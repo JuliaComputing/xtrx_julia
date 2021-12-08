@@ -127,6 +127,16 @@ class BaseSoC(SoCCore):
         if with_i2c:
             self.submodules.i2c = I2CMaster(platform.request("i2c"))
 
+        # Analyzer ---------------------------------------------------------------------------------
+        from litescope import LiteScopeAnalyzer
+        analyzer_signals = [
+            platform.lookup_request("i2c")
+        ]
+        self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = 256,
+            clock_domain = "sys",
+            csr_csv      = "analyzer.csv")
+
 # Build --------------------------------------------------------------------------------------------
 
 def main():
@@ -140,7 +150,7 @@ def main():
     args = parser.parse_args()
 
     soc = BaseSoC(sys_clk_freq = int(float(args.sys_clk_freq)))
-    builder  = Builder(soc, **builder_argdict(args))
+    builder  = Builder(soc, csr_csv="csr.csv")
     builder.build(run=args.build)
 
     if args.driver:
