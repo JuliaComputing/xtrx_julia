@@ -33,6 +33,7 @@ import fairwaves_xtrx_platform as fairwaves_xtrx
 from litex.soc.interconnect.csr import *
 from litex.soc.integration.soc_core import *
 from litex.soc.integration.builder import *
+from litex.soc.cores.bitbang import I2CMaster
 
 from litex.soc.cores.led import LedChaser
 from litex.soc.cores.clock import *
@@ -76,7 +77,7 @@ class CRG(Module):
 # BaseSoC -----------------------------------------------------------------------------------------
 
 class BaseSoC(SoCCore):
-    def __init__(self, sys_clk_freq=int(125e6), with_pcie=True, pcie_lanes=2, with_led_chaser=True):
+    def __init__(self, sys_clk_freq=int(125e6), with_pcie=True, pcie_lanes=2, with_led_chaser=True, with_i2c=True):
         platform = fairwaves_xtrx.Platform()
 
         # SoCMini ----------------------------------------------------------------------------------
@@ -121,6 +122,10 @@ class BaseSoC(SoCCore):
             self.submodules.leds = LedChaser(
                 pads         = platform.request_all("user_led"),
                 sys_clk_freq = sys_clk_freq)
+
+        # I2C --------------------------------------------------------------------------------------
+        if with_i2c:
+            self.submodules.i2c = I2CMaster(platform.request("i2c"))
 
 # Build --------------------------------------------------------------------------------------------
 
