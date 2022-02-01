@@ -175,24 +175,30 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
             throw std::runtime_error("invalid device");
     }
     switch (_dma_target) {
-    case TargetDevice::CPU:
-        dma_init_cpu(_fd);
-        _dma_buf = NULL;
-        break;
-    case TargetDevice::GPU:
-        size_t dma_buffer_total_size =
-            _dma_mmap_info.dma_tx_buf_count * _dma_mmap_info.dma_tx_buf_size +
-            _dma_mmap_info.dma_rx_buf_count * _dma_mmap_info.dma_rx_buf_size;
-        checked_cuda_call(
-            cuMemAlloc((CUdeviceptr *)&_dma_buf, dma_buffer_total_size));
+        case TargetDevice::CPU:
+            dma_init_cpu(_fd);
+            _dma_buf = NULL;
+            break;
+        case TargetDevice::GPU:
+            #ifdef GPU
 
-        unsigned int flag = 1;
-        checked_cuda_call(cuPointerSetAttribute(
-            &flag, CU_POINTER_ATTRIBUTE_SYNC_MEMOPS, (CUdeviceptr)_dma_buf));
+            size_t dma_buffer_total_size =
+                _dma_mmap_info.dma_tx_buf_count * _dma_mmap_info.dma_tx_buf_size +
+                _dma_mmap_info.dma_rx_buf_count * _dma_mmap_info.dma_rx_buf_size;
+            checked_cuda_call(
+                cuMemAlloc((CUdeviceptr *)&_dma_buf, dma_buffer_total_size));
 
-        dma_init_gpu(_fd, _dma_buf, dma_buffer_total_size);
+            unsigned int flag = 1;
+            checked_cuda_call(cuPointerSetAttribute(
+                &flag, CU_POINTER_ATTRIBUTE_SYNC_MEMOPS, (CUdeviceptr)_dma_buf));
+
+            dma_init_gpu(_fd, _dma_buf, dma_buffer_total_size);
+            #else
+                throw std::runtime_error("GPU support not enabled in build");
+            #endif
+
     }
-
+    
     // NOTE: if initialization misses a setting/register, try experimenting in
     //       LimeGUI and loading that register dump here
     //if (LMS7002M_load_ini(_lms, "configs/xtrx.ini"))

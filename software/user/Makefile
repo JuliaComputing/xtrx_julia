@@ -1,9 +1,9 @@
-CFLAGS=-O2 -Wall -g -I../kernel -Iliblitepcie -MMD -fPIC
+CFLAGS=-O2 -Wall -g -I../kernel -Iliblitepcie -MMD -fPIC -lrt -lm
 LDFLAGS=-g
 CC=$(CROSS_COMPILE)gcc
 AR=ar
 
-CFLAGS += $(shell pkgconf --cflags cuda)
+#CFLAGS += $(shell pkgconf --cflags cuda)
 
 PROGS=litepcie_util litepcie_test litepcie_dma_minimal_example
 

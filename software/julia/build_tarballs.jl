@@ -14,14 +14,15 @@ sources = [
 ]
 
 dependencies = [
-    Dependency("soapysdr_jll"; compat="~0.8.0"),
-    Dependency("CUDA_jll")
+    Dependency("soapysdr_jll"; compat="~0.8.0")
 ]
 
 # Bash recipe for building across all platforms
 script = raw"""
 ls
-cd software/soapysdr
+cd software/user
+make liblitepcie/liblitepcie.a
+cd ../soapysdr
 ls
 mkdir build && cd build
 cmake -DCMAKE_INSTALL_PREFIX=${prefix} \
