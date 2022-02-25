@@ -16,7 +16,6 @@
 #include <linux/slab.h>
 #include <linux/timer.h>
 #include <linux/tty_flip.h>
-#include <linux/xarray.h>
 
 #include "litex.h"
 
@@ -67,8 +66,6 @@ struct liteuart_port {
 
 #define to_liteuart_port(port)	container_of(port, struct liteuart_port, port)
 
-static DEFINE_XARRAY_FLAGS(liteuart_array, XA_FLAGS_ALLOC);
-
 #ifdef CONFIG_SERIAL_LITEUART_CONSOLE
 static struct console liteuart_console;
 #endif
@@ -76,6 +73,9 @@ static struct console liteuart_console;
 #ifndef CONFIG_SERIAL_LITEUART_MAX_PORTS
 #define CONFIG_SERIAL_LITEUART_MAX_PORTS 1
 #endif
+
+static struct liteuart_port liteuart_ports[CONFIG_SERIAL_LITEUART_MAX_PORTS];
+static DECLARE_BITMAP(liteuart_ports_in_use, CONFIG_SERIAL_LITEUART_MAX_PORTS);
 
 static struct uart_driver liteuart_driver = {
 	.owner = THIS_MODULE,
@@ -266,26 +266,22 @@ static int liteuart_probe(struct platform_device *pdev)
 {
 	struct liteuart_port *uart;
 	struct uart_port *port;
-	struct xa_limit limit;
 	struct resource *res;
 	int dev_id, ret;
 
 	/* look for aliases; auto-enumerate for free index if not found */
 	dev_id = of_alias_get_id(pdev->dev.of_node, "serial");
 	if (dev_id < 0)
-		limit = XA_LIMIT(0, CONFIG_SERIAL_LITEUART_MAX_PORTS);
-	else
-		limit = XA_LIMIT(dev_id, dev_id);
+		dev_id = find_first_zero_bit(liteuart_ports_in_use,
+					     CONFIG_SERIAL_LITEUART_MAX_PORTS);
 
-	uart = devm_kzalloc(&pdev->dev, sizeof(struct liteuart_port), GFP_KERNEL);
-	if (!uart)
-		return -ENOMEM;
+	if (dev_id >= CONFIG_SERIAL_LITEUART_MAX_PORTS)
+		return -ENODEV;
 
-	ret = xa_alloc(&liteuart_array, &dev_id, uart, limit, GFP_KERNEL);
-	if (ret)
-		return ret;
+	if (test_and_set_bit(dev_id, liteuart_ports_in_use))
+		return -EBUSY;
 
-	uart->id = dev_id;
+	uart = &liteuart_ports[dev_id];
 	port = &uart->port;
 
 	/* get membase */
@@ -326,7 +322,7 @@ static int liteuart_probe(struct platform_device *pdev)
 	return 0;
 
 err_erase_id:
-	xa_erase(&liteuart_array, uart->id);
+	clear_bit(dev_id, liteuart_ports_in_use);
 
 	return ret;
 }
@@ -337,7 +333,7 @@ static int liteuart_remove(struct platform_device *pdev)
 	struct liteuart_port *uart = to_liteuart_port(port);
 
 	uart_remove_one_port(&liteuart_driver, port);
-	xa_erase(&liteuart_array, uart->id);
+	clear_bit(uart->id, liteuart_ports_in_use);
 
 	return 0;
 }
@@ -366,7 +362,7 @@ static void liteuart_console_write(struct console *co, const char *s,
 	struct uart_port *port;
 	unsigned long flags;
 
-	uart = (struct liteuart_port *)xa_load(&liteuart_array, co->index);
+	uart = liteuart_ports[co->index];
 	port = &uart->port;
 
 	spin_lock_irqsave(&port->lock, flags);
@@ -383,7 +379,7 @@ static int liteuart_console_setup(struct console *co, char *options)
 	int parity = 'n';
 	int flow = 'n';
 
-	uart = (struct liteuart_port *)xa_load(&liteuart_array, co->index);
+	uart = liteuart_ports[co->index];
 	if (!uart)
 		return -ENODEV;
 
