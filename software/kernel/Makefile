@@ -2,6 +2,7 @@
 KERNEL_VERSION:=$(shell uname -r)
 KERNEL_PATH?=/lib/modules/$(KERNEL_VERSION)/build
 ARCH?=$(shell uname -m)
+ARCH=arm64
 
 obj-m = litepcie.o liteuart.o
 litepcie-objs = main.o
