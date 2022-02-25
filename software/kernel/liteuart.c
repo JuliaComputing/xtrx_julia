@@ -89,9 +89,9 @@ static struct uart_driver liteuart_driver = {
 #endif
 };
 
-static void liteuart_timer(struct timer_list *t)
+static void liteuart_timer(unsigned long data)
 {
-	struct liteuart_port *uart = from_timer(uart, t, timer);
+	struct liteuart_port *uart = (struct liteuart_port *)data;
 	struct uart_port *port = &uart->port;
 	unsigned char __iomem *membase = port->membase;
 	unsigned int flg = TTY_NORMAL;
@@ -186,7 +186,7 @@ static int liteuart_startup(struct uart_port *port)
 	litex_write8(port->membase + OFF_EV_ENABLE, 0);
 
 	/* prepare timer for polling */
-	timer_setup(&uart->timer, liteuart_timer, 0);
+	setup_timer(&uart->timer, liteuart_timer, (unsigned long)uart);
 	mod_timer(&uart->timer, jiffies + uart_poll_timeout(port));
 
 	return 0;
