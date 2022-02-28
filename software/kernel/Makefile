@@ -1,8 +1,6 @@
 # Makefile for kernel module
 KERNEL_VERSION:=$(shell uname -r)
 KERNEL_PATH?=/lib/modules/$(KERNEL_VERSION)/build
-ARCH?=$(shell uname -m)
-ARCH=arm64
 
 obj-m = litepcie.o liteuart.o
 litepcie-objs = main.o
@@ -19,6 +17,10 @@ else
 endif
 ccflags-y += -I$(NVIDIA_SRC_DIR)
 
+# XXX: put this in a script a la
+#      https://github.com/NVIDIA/jetson-rdma-picoevb/blob/3ad215b41f9a0628a5d6370612e006ce694eee18/kernel-module/build-for-pc-native.sh
+#ccflags-y += -DNV_BUILD_DGPU
+
 # don't warn about missing NVIDIA symbols; they'll be available
 # TODO: create our own Module.symvers,
 #       https://github.com/NVIDIA/gds-nvidia-fs/blob/af3f7de96b4e500abf30e3034e5827749953bd68/src/Makefile#L108-L112
@@ -27,13 +29,13 @@ KBUILD_MODPOST_WARN=1
 all: litepcie.ko liteuart.ko
 
 litepcie.ko: main.c
-	make -C $(KERNEL_PATH) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) M=$(shell pwd) modules
+	make -C $(KERNEL_PATH) M=$(shell pwd) modules
 
 litepcie.ko: litepcie.h config.h flags.h csr.h soc.h
 
 liteuart.ko: liteuart.c
-	make -C $(KERNEL_PATH) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) M=$(shell pwd) modules
+	make -C $(KERNEL_PATH) M=$(shell pwd) modules
 
 clean:
-	make -C $(KERNEL_PATH) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) M=$(shell pwd) clean
+	make -C $(KERNEL_PATH) M=$(shell pwd) clean
 	rm -f *~
