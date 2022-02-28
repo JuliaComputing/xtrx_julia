@@ -37,7 +37,12 @@
 #include "csr.h"
 #include "config.h"
 #include "flags.h"
-#include "nv-p2p.h"
+
+#ifdef NV_BUILD_DGPU
+#include <nv-p2p.h>
+#else
+#include <linux/nv-p2p.h>
+#endif
 
 //#define DEBUG_CSR
 //#define DEBUG_MSI
@@ -257,21 +262,40 @@ void litepcie_dma_free_gpu(void *data) {
 	}
 }
 
+// XXX: significant API differences...
+//      https://github.com/NVIDIA/jetson-rdma-picoevb/blob/ac57d9b02f77a95d587f334a787792ad035ab497/kernel-module/picoevb-rdma.c
+
 static int litepcie_dma_deinit_gpu(struct litepcie_device *s)
 {
 	int error;
 
+#ifdef NV_BUILD_DGPU
 	error = nvidia_p2p_dma_unmap_pages(s->dev, s->gpu_page_table, s->gpu_dma_mapping);
+#else
+	error = nvidia_p2p_dma_unmap_pages(s->gpu_dma_mapping);
+#endif
 	if (error != 0) {
 		dev_err(&s->dev->dev, "Error in nvidia_p2p_dma_unmap_pages()\n");
 		return -EINVAL;
 	}
 
-	error = nvidia_p2p_put_pages(0, 0, s->gpu_virt_start, s->gpu_page_table);
+	error = nvidia_p2p_put_pages(
+#ifdef NV_BUILD_DGPU
+		0, 0, s->gpu_virt_start,
+#endif
+		s->gpu_page_table);
 	if (error != 0) {
 		dev_err(&s->dev->dev, "Error in nvidia_p2p_put_pages()\n");
 		return -EINVAL;
 	}
+#ifdef NV_BUILD_DGPU
+	litepcie_dma_free_gpu(s);
+#else
+	/*
+		* nvidia_p2p_put_pages() calls litepcie_dma_free_gpu() which
+		* frees s.
+		*/
+#endif
 
 	s->dma_source = None;
 	return 0;
@@ -302,7 +326,10 @@ static int litepcie_dma_init_gpu(struct litepcie_device *s, uint64_t addr, uint6
 
 	// make the virtual memory accessible to other devices
 	error = nvidia_p2p_get_pages(
-		0, 0, s->gpu_virt_start, pin_size, &s->gpu_page_table,
+#ifdef NV_BUILD_DGPU
+		0, 0,
+#endif
+		s->gpu_virt_start, pin_size, &s->gpu_page_table,
 		litepcie_dma_free_gpu, s);
 	if (error != 0) {
 		dev_err(&s->dev->dev, "Error in nvidia_p2p_get_pages()\n");
@@ -319,7 +346,11 @@ static int litepcie_dma_init_gpu(struct litepcie_device *s, uint64_t addr, uint6
 	}
 
 	// make the physical memory accessible to other devices
+#ifdef NV_BUILD_DGPU
 	error = nvidia_p2p_dma_map_pages(s->dev, s->gpu_page_table, &s->gpu_dma_mapping);
+#else
+	error = nvidia_p2p_dma_map_pages(&s->dev->dev, s->gpu_page_table, &s->gpu_dma_mapping, DMA_BIDIRECTIONAL);
+#endif
 	if (error != 0) {
 		dev_err(&s->dev->dev, "Error in nvidia_p2p_dma_map_pages()\n");
 		error = -EINVAL;
@@ -341,34 +372,61 @@ static int litepcie_dma_init_gpu(struct litepcie_device *s, uint64_t addr, uint6
 		dmachan = &s->chan[i].dma;
 		/* for each dma buffer */
 		for (j = 0; j < DMA_BUFFER_COUNT; j++) {
+			size_t len =
+#ifdef NV_BUILD_DGPU
+			GPU_PAGE SIZE:
+#else
+			s->gpu_dma_mapping->hw_len[page];
+#endif
+
 			/* allocate rd */
-			if (offset + DMA_BUFFER_SIZE > GPU_PAGE_SIZE) {
+			if (offset + DMA_BUFFER_SIZE > len) {
 				page += 1;
 				offset = 0;
+#ifndef NV_BUILD_DGPU
+				len = s->gpu_dma_mapping->hw_len[page];
+#endif
 			}
 			if (page >= s->gpu_page_table->entries) {
 				error = -ENOMEM;
 				goto do_unmap_pages;
 			}
+#ifdef NV_BUILD_DGPU
 			nvp = s->gpu_page_table->pages[page];
 			BUG_ON(!nvp);
 			dmachan->reader_addr[j] = (uint32_t*)(nvp->physical_address + offset);
-			dmachan->reader_handle[j] = ((dma_addr_t)s->gpu_dma_mapping->dma_addresses[page]) + offset;
+#endif
+			dmachan->reader_handle[j] =
+#ifdef NV_BUILD_DGPU
+				((dma_addr_t)s->gpu_dma_mapping->dma_addresses[page]) + offset;
+#else
+				((dma_addr_t)s->gpu_dma_mapping->hw_address[page]) + offset;
+#endif
 			offset += DMA_BUFFER_SIZE;
 
 			/* allocate wr */
-			if (offset + DMA_BUFFER_SIZE > GPU_PAGE_SIZE) {
+			if (offset + DMA_BUFFER_SIZE > len) {
 				page += 1;
 				offset = 0;
+#ifndef NV_BUILD_DGPU
+				len = s->gpu_dma_mapping->hw_len[page];
+#endif
 			}
 			if (page >= s->gpu_page_table->entries) {
 				error = -ENOMEM;
 				goto do_unmap_pages;
 			}
+#ifdef NV_BUILD_DGPU
 			nvp = s->gpu_page_table->pages[page];
 			BUG_ON(!nvp);
 			dmachan->writer_addr[j] = (uint32_t*)(nvp->physical_address + offset);
-			dmachan->writer_handle[j] = ((dma_addr_t)s->gpu_dma_mapping->dma_addresses[page]) + offset;
+#endif
+			dmachan->writer_handle[j] =
+#ifdef NV_BUILD_DGPU
+				((dma_addr_t)s->gpu_dma_mapping->dma_addresses[page]) + offset;
+#else
+				((dma_addr_t)s->gpu_dma_mapping->hw_address[page]) + offset;
+#endif
 			offset += DMA_BUFFER_SIZE;
 		}
 	}
@@ -377,9 +435,20 @@ static int litepcie_dma_init_gpu(struct litepcie_device *s, uint64_t addr, uint6
 	return 0;
 
 do_unmap_pages:
+#ifdef NV_BUILD_DGPU
 	nvidia_p2p_dma_unmap_pages(s->dev, s->gpu_page_table, s->gpu_dma_mapping);
+#else
+	nvidia_p2p_dma_unmap_pages(s->gpu_dma_mapping);
+#endif
 do_unlock_pages:
-	nvidia_p2p_put_pages(0, 0, s->gpu_virt_start, s->gpu_page_table);
+	nvidia_p2p_put_pages(
+#ifdef NV_BUILD_DGPU
+		0, 0, s->gpu_virt_start,
+#endif
+		s->gpu_page_table);
+#ifdef NV_BUILD_DGPU
+	litepcie_dma_free_gpu(s);
+#endif
 do_exit:
 	return error;
 }
@@ -808,6 +877,7 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 	for (i = 0; i < DMA_BUFFER_COUNT; i++) {
 		if (s->dma_source == GPU) {
 			// with GPU-backed memory buffers, addresses are physical already
+			// XXX: not supported on Tegra
 			if (is_tx)
 				pfn = ((unsigned long)chan->dma.reader_addr[i]) >> PAGE_SHIFT;
 			else
