@@ -1,8 +1,9 @@
-#!/bin/sh
+#!/bin/bash -ue
 # TODO: use udev instead
 
-FOUND=$(lsmod | grep litepcie)
-if [ "$FOUND" != "" ] ; then
+cd -- "$( dirname -- "${BASH_SOURCE[0]}" )"
+
+if lsmod | grep -q litepcie; then
     echo "Module already installed"
     exit 0
 fi
@@ -40,6 +41,6 @@ fi
 sudo insmod liteuart.ko
 
 for i in `seq 0 16` ; do
-    sudo chmod 666 /dev/litepcie$i > /dev/null 2>&1
+    sudo chmod 666 /dev/litepcie$i > /dev/null 2>&1 || true
 done
 
