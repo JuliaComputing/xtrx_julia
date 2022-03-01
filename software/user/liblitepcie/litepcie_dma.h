@@ -26,6 +26,7 @@ struct litepcie_dma_ctrl {
     struct litepcie_ioctl_mmap_dma_info mmap_dma_info;
     struct litepcie_ioctl_mmap_dma_update mmap_dma_update;
     CUdeviceptr gpu_buf;
+    CUdeviceptr gpu_ptr;
 };
 
 void litepcie_dma_set_loopback(int fd, uint8_t loopback_enable);

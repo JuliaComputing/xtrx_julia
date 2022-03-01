@@ -96,12 +96,13 @@ int litepcie_dma_init(struct litepcie_dma_ctrl *dma, const char *device_name, ui
     }
 
     if (gpu) {
-        checked_cuda_call(cuMemAlloc(&dma->gpu_buf, 2*DMA_BUFFER_TOTAL_SIZE));
+        checked_cuda_call(cuMemAllocHost(&dma->gpu_buf, 2*DMA_BUFFER_TOTAL_SIZE));
 
         unsigned int flag = 1;
         checked_cuda_call(cuPointerSetAttribute(&flag, CU_POINTER_ATTRIBUTE_SYNC_MEMOPS, dma->gpu_buf));
 
-        litepcie_dma_init_gpu(dma->fds.fd, (void*)dma->gpu_buf, 2*DMA_BUFFER_TOTAL_SIZE);
+        checked_cuda_call(cuMemHostGetDevicePointer(&dma->gpu_ptr, dma->gpu_buf, 0));
+        litepcie_dma_init_gpu(dma->fds.fd, (void*)dma->gpu_ptr, 2*DMA_BUFFER_TOTAL_SIZE);
     } else {
         litepcie_dma_init_cpu(dma->fds.fd);
     }
