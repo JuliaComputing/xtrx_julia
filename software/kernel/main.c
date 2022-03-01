@@ -109,7 +109,7 @@ struct litepcie_device {
 	int channels;
 
 	enum DMASource dma_source;
-	uint64_t gpu_virt_start;	// start page address of the virtual memory
+	uint64_t gpu_virt_start, gpu_virt_end;	// start page address of the virtual memory
 	nvidia_p2p_page_table_t *gpu_page_table;
 	nvidia_p2p_dma_mapping_t *gpu_dma_mapping;
 };
@@ -317,7 +317,8 @@ static int litepcie_dma_init_gpu(struct litepcie_device *s, uint64_t addr, uint6
 
 	// alignment as required by the NVIDIA driver
 	s->gpu_virt_start = (addr & GPU_PAGE_MASK);
-	pin_size = addr + size - s->gpu_virt_start;
+	s->gpu_virt_end = (addr + size + GPU_PAGE_SIZE - 1) & GPU_PAGE_MASK;
+	pin_size = s->gpu_virt_end - s->gpu_virt_start;
 	if (!pin_size) {
 		dev_err(&s->dev->dev, "Error invalid memory size!\n");
 		error = -EINVAL;
