@@ -3,7 +3,7 @@ LDFLAGS=-g
 CC=$(CROSS_COMPILE)gcc
 AR=ar
 
-CFLAGS += $(shell pkgconf --cflags cuda)
+CFLAGS += $(shell pkgconf --cflags cuda-10.2)
 
 PROGS=litepcie_util litepcie_test litepcie_dma_minimal_example
 
