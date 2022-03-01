@@ -364,7 +364,14 @@ static int litepcie_dma_init_gpu(struct litepcie_device *s, uint64_t addr, uint6
 		error = -EINVAL;
 		goto do_unlock_pages;
 	}
+
+#ifdef NV_BUILD_DGPU
+	// on non-Tegra, the number of page table entries is equal to the number of
+	// DMA mapping entries. This makes it possible to iterate both together
+	// and retrieve the physical address of each mapping directly.
+	// TODO: can we use dma_to_phys on non-Tegra too?
 	BUG_ON(s->gpu_page_table->entries != s->gpu_dma_mapping->entries);
+#endif
 
 	/* for each dma channel */
 	page = 0;
@@ -388,22 +395,22 @@ static int litepcie_dma_init_gpu(struct litepcie_device *s, uint64_t addr, uint6
 				len = s->gpu_dma_mapping->hw_len[page];
 #endif
 			}
-			if (page >= s->gpu_page_table->entries) {
+			if (page >= s->gpu_dma_mapping->entries) {
 				error = -ENOMEM;
 				goto do_unmap_pages;
 			}
 #ifdef NV_BUILD_DGPU
+			dmachan->reader_handle[j] = ((dma_addr_t)s->gpu_dma_mapping->dma_addresses[page]) + offset;
 			nvp = s->gpu_page_table->pages[page];
 			BUG_ON(!nvp);
 			dmachan->reader_addr[j] = (uint32_t*)(nvp->physical_address + offset);
-#endif
-			dmachan->reader_handle[j] =
-#ifdef NV_BUILD_DGPU
-				((dma_addr_t)s->gpu_dma_mapping->dma_addresses[page]) + offset;
 #else
-				((dma_addr_t)s->gpu_dma_mapping->hw_address[page]) + offset;
+			dmachan->reader_handle[j] = ((dma_addr_t)s->gpu_dma_mapping->hw_address[page]) + offset;
+			dmachan->reader_addr[j] = dma_to_phys(&s->dev->dev, dmachan->reader_handle[j]);
 #endif
 			offset += DMA_BUFFER_SIZE;
+			dev_info(&s->dev->dev, "dmachan %d reader_handle[%d] = %p\n", i, j, (void*) dmachan->reader_handle[j]);
+			dev_info(&s->dev->dev, "dmachan %d reader_addr[%d] = %p\n", i, j, dmachan->reader_addr[j]);
 
 			/* allocate wr */
 			if (offset + DMA_BUFFER_SIZE > len) {
@@ -413,22 +420,22 @@ static int litepcie_dma_init_gpu(struct litepcie_device *s, uint64_t addr, uint6
 				len = s->gpu_dma_mapping->hw_len[page];
 #endif
 			}
-			if (page >= s->gpu_page_table->entries) {
+			if (page >= s->gpu_dma_mapping->entries) {
 				error = -ENOMEM;
 				goto do_unmap_pages;
 			}
 #ifdef NV_BUILD_DGPU
+			dmachan->writer_handle[j] = ((dma_addr_t)s->gpu_dma_mapping->dma_addresses[page]) + offset;
 			nvp = s->gpu_page_table->pages[page];
 			BUG_ON(!nvp);
 			dmachan->writer_addr[j] = (uint32_t*)(nvp->physical_address + offset);
-#endif
-			dmachan->writer_handle[j] =
-#ifdef NV_BUILD_DGPU
-				((dma_addr_t)s->gpu_dma_mapping->dma_addresses[page]) + offset;
 #else
-				((dma_addr_t)s->gpu_dma_mapping->hw_address[page]) + offset;
+			dmachan->writer_handle[j] = ((dma_addr_t)s->gpu_dma_mapping->hw_address[page]) + offset;
+			dmachan->writer_addr[j] = dma_to_phys(&s->dev->dev, dmachan->writer_handle[j]);
 #endif
 			offset += DMA_BUFFER_SIZE;
+			dev_info(&s->dev->dev, "dmachan %d writer_handle[%d] = %p\n", i, j, (void*) dmachan->writer_handle[j]);
+			dev_info(&s->dev->dev, "dmachan %d writer_addr[%d] = %p\n", i, j, dmachan->writer_addr[j]);
 		}
 	}
 
