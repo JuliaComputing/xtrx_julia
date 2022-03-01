@@ -308,7 +308,9 @@ static int litepcie_dma_init_gpu(struct litepcie_device *s, uint64_t addr, uint6
 	struct litepcie_dma_chan *dmachan;
 	size_t pin_size;
 	int page, offset;
-	struct nvidia_p2p_page * nvp;
+	struct page *nvp;
+	phys_addr_t phys_addr;
+	dma_addr_t dma_addr;
 
 	if (!s)
 		return -ENODEV;
@@ -369,7 +371,10 @@ static int litepcie_dma_init_gpu(struct litepcie_device *s, uint64_t addr, uint6
 	// on non-Tegra, the number of page table entries is equal to the number of
 	// DMA mapping entries. This makes it possible to iterate both together
 	// and retrieve the physical address of each mapping directly.
-	// TODO: can we use dma_to_phys on non-Tegra too?
+	//
+	// on Tegra, I'm not sure how to use the DMA entries, and instead we iterate
+	// the page table and use phys_to_dma to get the DMA handles.
+	// TODO: can we use phys_to_dma on non-Tegra too?
 	BUG_ON(s->gpu_page_table->entries != s->gpu_dma_mapping->entries);
 #endif
 
@@ -380,33 +385,27 @@ static int litepcie_dma_init_gpu(struct litepcie_device *s, uint64_t addr, uint6
 		dmachan = &s->chan[i].dma;
 		/* for each dma buffer */
 		for (j = 0; j < DMA_BUFFER_COUNT; j++) {
-			size_t len =
-#ifdef NV_BUILD_DGPU
-			GPU_PAGE SIZE:
-#else
-			s->gpu_dma_mapping->hw_len[page];
-#endif
+			size_t len = GPU_PAGE_SIZE;
 
 			/* allocate rd */
 			if (offset + DMA_BUFFER_SIZE > len) {
 				page += 1;
 				offset = 0;
-#ifndef NV_BUILD_DGPU
-				len = s->gpu_dma_mapping->hw_len[page];
-#endif
 			}
-			if (page >= s->gpu_dma_mapping->entries) {
+			if (page >= s->gpu_page_table->entries) {
 				error = -ENOMEM;
 				goto do_unmap_pages;
 			}
-#ifdef NV_BUILD_DGPU
-			dmachan->reader_handle[j] = ((dma_addr_t)s->gpu_dma_mapping->dma_addresses[page]) + offset;
 			nvp = s->gpu_page_table->pages[page];
 			BUG_ON(!nvp);
+#ifdef NV_BUILD_DGPU
 			dmachan->reader_addr[j] = (uint32_t*)(nvp->physical_address + offset);
+			dmachan->reader_handle[j] = ((dma_addr_t)s->gpu_dma_mapping->dma_addresses[page]) + offset;
 #else
-			dmachan->reader_handle[j] = ((dma_addr_t)s->gpu_dma_mapping->hw_address[page]) + offset;
-			dmachan->reader_addr[j] = dma_to_phys(&s->dev->dev, dmachan->reader_handle[j]);
+			phys_addr = page_to_phys(nvp);
+			dma_addr = phys_to_dma(&s->dev->dev, phys_addr);
+			dmachan->reader_addr[j] = (uint32_t*)(phys_addr + offset);
+			dmachan->reader_handle[j] = dma_addr + offset;
 #endif
 			offset += DMA_BUFFER_SIZE;
 			dev_info(&s->dev->dev, "dmachan %d reader_handle[%d] = %p\n", i, j, (void*) dmachan->reader_handle[j]);
@@ -416,22 +415,21 @@ static int litepcie_dma_init_gpu(struct litepcie_device *s, uint64_t addr, uint6
 			if (offset + DMA_BUFFER_SIZE > len) {
 				page += 1;
 				offset = 0;
-#ifndef NV_BUILD_DGPU
-				len = s->gpu_dma_mapping->hw_len[page];
-#endif
 			}
-			if (page >= s->gpu_dma_mapping->entries) {
+			if (page >= s->gpu_page_table->entries) {
 				error = -ENOMEM;
 				goto do_unmap_pages;
 			}
-#ifdef NV_BUILD_DGPU
-			dmachan->writer_handle[j] = ((dma_addr_t)s->gpu_dma_mapping->dma_addresses[page]) + offset;
 			nvp = s->gpu_page_table->pages[page];
 			BUG_ON(!nvp);
+#ifdef NV_BUILD_DGPU
 			dmachan->writer_addr[j] = (uint32_t*)(nvp->physical_address + offset);
+			dmachan->writer_handle[j] = ((dma_addr_t)s->gpu_dma_mapping->dma_addresses[page]) + offset;
 #else
-			dmachan->writer_handle[j] = ((dma_addr_t)s->gpu_dma_mapping->hw_address[page]) + offset;
-			dmachan->writer_addr[j] = dma_to_phys(&s->dev->dev, dmachan->writer_handle[j]);
+			phys_addr = page_to_phys(nvp);
+			dma_addr = phys_to_dma(&s->dev->dev, phys_addr);
+			dmachan->writer_addr[j] = (uint32_t*)(phys_addr + offset);
+			dmachan->writer_handle[j] = dma_addr + offset;
 #endif
 			offset += DMA_BUFFER_SIZE;
 			dev_info(&s->dev->dev, "dmachan %d writer_handle[%d] = %p\n", i, j, (void*) dmachan->writer_handle[j]);
@@ -885,7 +883,6 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 	for (i = 0; i < DMA_BUFFER_COUNT; i++) {
 		if (s->dma_source == GPU) {
 			// with GPU-backed memory buffers, addresses are physical already
-			// XXX: not supported on Tegra
 			if (is_tx)
 				pfn = ((unsigned long)chan->dma.reader_addr[i]) >> PAGE_SHIFT;
 			else
@@ -903,6 +900,7 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 		 * Note: the memory is cached, so the user must explicitly
 		 * flush the CPU caches on architectures which require it.
 		 */
+		// XXX: crashes on Tegra
 		if (remap_pfn_range(vma, vma->vm_start + i * DMA_BUFFER_SIZE, pfn,
 				    DMA_BUFFER_SIZE, vma->vm_page_prot)) {
 			dev_err(&s->dev->dev, "mmap remap_pfn_range failed\n");
