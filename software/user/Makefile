@@ -3,8 +3,6 @@ LDFLAGS=-g
 CC=$(CROSS_COMPILE)gcc
 AR=ar
 
-CFLAGS += $(shell pkgconf --cflags cuda)
-
 PROGS=litepcie_util litepcie_test litepcie_dma_minimal_example
 
 all: $(PROGS)
@@ -14,13 +12,13 @@ liblitepcie/liblitepcie.a: liblitepcie/litepcie_dma.o liblitepcie/litepcie_flash
 	ranlib $@
 
 litepcie_util: liblitepcie/liblitepcie.a litepcie_util.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -llitepcie -lcuda
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -llitepcie
 
 litepcie_test: liblitepcie/liblitepcie.a litepcie_test.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie -lcuda
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie
 
 litepcie_dma_minimal_example: liblitepcie/liblitepcie.a litepcie_dma_minimal_example.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -llitepcie -lcuda
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -llitepcie
 
 clean:
 	rm -f $(PROGS) *.o *.a *.d *~ liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d
