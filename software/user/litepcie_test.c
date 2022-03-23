@@ -15,7 +15,6 @@
 #include <fcntl.h>
 #include <math.h>
 #include <signal.h>
-#include <cuda.h>
 #include "liblitepcie.h"
 
 sig_atomic_t keep_running = 1;
@@ -24,32 +23,16 @@ void intHandler(int dummy) {
     keep_running = 0;
 }
 
-#define checkError(status) { __checkError((status), __FILE__, __LINE__); }
-void __checkError(CUresult status, const char *file, int line) {
-    if (status != CUDA_SUCCESS) {
-        const char *perrstr = 0;
-        CUresult ok = cuGetErrorString(status, &perrstr);
-        if (ok == CUDA_SUCCESS) {
-            if (perrstr) {
-                fprintf(stderr, "CUDA error at %s:%d: %s\n", file, line, perrstr);
-            } else {
-                fprintf(stderr, "CUDA error at %s:%d: unknown error\n", file, line);
-            }
-        }
-        exit(1);
-    }
-}
-
 /* litepcie */
 
-static void litepcie_init(const char *device_name, const char *rate, uint8_t gpu)
+static void litepcie_init(const char *device_name, const char *rate)
 {
     struct litepcie_dma_ctrl dma = {.loopback = 0};
-    if (!litepcie_dma_init(&dma, device_name, 0, gpu))
+    if (!litepcie_dma_init(&dma, device_name, 0))
         litepcie_dma_cleanup(&dma);
 }
 
-static void litepcie_record(const char *device_name, const char *filename, uint32_t size, uint8_t zero_copy, uint8_t gpu)
+static void litepcie_record(const char *device_name, const char *filename, uint32_t size, uint8_t zero_copy)
 {
     static struct litepcie_dma_ctrl dma = {.use_writer = 1};
 
@@ -69,7 +52,7 @@ static void litepcie_record(const char *device_name, const char *filename, uint3
         }
     }
 
-    if (litepcie_dma_init(&dma, device_name, zero_copy, gpu))
+    if (litepcie_dma_init(&dma, device_name, zero_copy))
         exit(1);
 
     /* test loop */
@@ -116,7 +99,7 @@ static void litepcie_record(const char *device_name, const char *filename, uint3
         fclose(fo);
 }
 
-static void litepcie_play(const char *device_name, const char *filename, uint32_t loops, uint8_t zero_copy, uint8_t gpu)
+static void litepcie_play(const char *device_name, const char *filename, uint32_t loops, uint8_t zero_copy)
 {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1};
 
@@ -128,7 +111,7 @@ static void litepcie_play(const char *device_name, const char *filename, uint32_
     uint32_t current_loop = 0;
     uint64_t sw_underflows = 0;
 
-    if (litepcie_dma_init(&dma, device_name, zero_copy, gpu))
+    if (litepcie_dma_init(&dma, device_name, zero_copy))
         exit(1);
 
     fo = fopen(filename, "rb");
@@ -209,16 +192,14 @@ int main(int argc, char **argv)
     static char litepcie_device[1024];
     static int litepcie_device_num;
     static uint8_t litepcie_device_zero_copy;
-    static int cuda_device_num;
 
     litepcie_device_num = 0;
     litepcie_device_zero_copy = 0;
-    cuda_device_num = -1;
 
     signal(SIGINT, intHandler);
 
     for (;;) {
-        c = getopt(argc, argv, "hc:g:z");
+        c = getopt(argc, argv, "hc:z");
         if (c == -1)
             break;
         switch(c) {
@@ -227,9 +208,6 @@ int main(int argc, char **argv)
             break;
         case 'c':
             litepcie_device_num = atoi(optarg);
-            break;
-        case 'g':
-            cuda_device_num = atoi(optarg);
             break;
         case 'z':
             litepcie_device_zero_copy = 1;
@@ -244,14 +222,6 @@ int main(int argc, char **argv)
 
     snprintf(litepcie_device, sizeof(litepcie_device), "/dev/litepcie%d", litepcie_device_num);
 
-    CUdevice gpu_dev;
-    CUcontext gpu_ctx;
-    if (cuda_device_num >= 0) {
-        checkError(cuInit(0));
-        checkError(cuDeviceGet(&gpu_dev, cuda_device_num));
-        checkError(cuCtxCreate(&gpu_ctx, 0, gpu_dev));
-    }
-
     cmd = argv[optind++];
 
     if (!strcmp(cmd, "init")) {
@@ -259,7 +229,7 @@ int main(int argc, char **argv)
         if (optind + 1 > argc)
             goto show_help;
         rate = argv[optind++];
-        litepcie_init(litepcie_device, rate, cuda_device_num >= 0);
+        litepcie_init(litepcie_device, rate);
     } else if (!strcmp(cmd, "record")) {
         const char *filename = NULL;
         uint32_t size = 0;
@@ -269,7 +239,7 @@ int main(int argc, char **argv)
             filename = argv[optind++];
             size = strtoul(argv[optind++], NULL, 0);
         }
-        litepcie_record(litepcie_device, filename, size, litepcie_device_zero_copy, cuda_device_num >= 0);
+        litepcie_record(litepcie_device, filename, size, litepcie_device_zero_copy);
     } else if (!strcmp(cmd, "play")) {
         const char *filename;
         uint32_t loops = 1;
@@ -278,7 +248,7 @@ int main(int argc, char **argv)
         filename = argv[optind++];
         if (optind < argc)
             loops = strtoul(argv[optind++], NULL, 0);
-        litepcie_play(litepcie_device, filename, loops, litepcie_device_zero_copy, cuda_device_num >= 0);
+        litepcie_play(litepcie_device, filename, loops, litepcie_device_zero_copy);
     } else
 show_help:
         help();

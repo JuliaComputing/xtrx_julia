@@ -23,8 +23,6 @@
 static char litepcie_device[1024];
 static int litepcie_device_num;
 
-static int cuda_device_num;
-
 sig_atomic_t keep_running = 1;
 
 void intHandler(int dummy) {
@@ -65,31 +63,6 @@ static void info(void)
            (double)litepcie_readl(fd, CSR_XADC_VCCBRAM_ADDR) / 4096 * 3);
 #endif
     close(fd);
-
-    if (cuda_device_num >= 0) {
-        checked_cuda_call(cuInit(0));
-
-        CUdevice device;
-        checked_cuda_call(cuDeviceGet(&device, cuda_device_num));
-
-        char name[256];
-        checked_cuda_call(cuDeviceGetName(name, 256, device));
-        fprintf(stderr, "GPU identification: %s\n", name);
-
-        // get compute capabilities and the devicename
-        int major = 0, minor = 0;
-        checked_cuda_call(
-            cuDeviceGetAttribute(&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device));
-        checked_cuda_call(
-            cuDeviceGetAttribute(&minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device));
-        fprintf(stderr, "GPU compute capability: %d.%d\n", major, minor);
-
-        size_t global_mem = 0;
-        checked_cuda_call(cuDeviceTotalMem(&global_mem, device));
-        fprintf(stderr, "GPU global memory: %llu MB\n", (unsigned long long)(global_mem >> 20));
-        if (global_mem > (unsigned long long)4 * 1024 * 1024 * 1024L)
-            fprintf(stderr, "GPU 64-bit memory address support\n");
-    }
 }
 
 #ifdef CSR_FLASH_BASE
@@ -310,7 +283,7 @@ static int check_pn_data(const uint32_t *buf, int count, uint32_t *pseed, int da
 }
 #endif
 
-static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width)
+static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width, int auto_rx_delay)
 {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1, .use_writer = 1};
     dma.loopback = external_loopback ? 0 : 1;
@@ -329,44 +302,13 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
 #ifdef DMA_CHECK_DATA
     uint32_t seed_wr = 0;
     uint32_t seed_rd = 0;
-    uint8_t  run = 0;
+    uint8_t  run = (auto_rx_delay == 0);
 #endif
-
-    CUdevice gpu_dev;
-    CUcontext gpu_ctx;
-    if (cuda_device_num >= 0) {
-        checked_cuda_call(cuInit(0));
-        checked_cuda_call(cuDeviceGet(&gpu_dev, cuda_device_num));
-        checked_cuda_call(cuCtxCreate(&gpu_ctx, 0, gpu_dev));
-    }
 
     signal(SIGINT, intHandler);
 
-    if (litepcie_dma_init(&dma, litepcie_device, zero_copy, cuda_device_num >= 0))
+    if (litepcie_dma_init(&dma, litepcie_device, zero_copy))
         exit(1);
-
-#ifdef DMA_CHECK_DATA
-    if (cuda_device_num >= 0) {
-        write_pn_data((uint32_t *) dma.buf_wr, DMA_BUFFER_TOTAL_SIZE/4, &seed_wr, data_width);
-
-        // check whether GPU memory, initialized by writing to mmapped memory,
-        // can be read back and verified using CUDA API calls.
-        void* cpu_buf = malloc(2*DMA_BUFFER_TOTAL_SIZE);
-        checked_cuda_call(cuMemcpyDtoH(cpu_buf, dma.gpu_buf, 2*DMA_BUFFER_TOTAL_SIZE));
-        for (i = 0; i < DMA_BUFFER_COUNT; i++) {
-            // access the underlying memory in the way the kernel driver would
-            errors += check_pn_data(
-                (uint32_t *) cpu_buf + i*DMA_BUFFER_SIZE/2,
-                DMA_BUFFER_SIZE/4,
-                &seed_rd, data_width
-            );
-        }
-        if (errors) {
-            fprintf(stderr, "GPU memory initialization failed (%d errors), exiting.\n", errors);
-            exit(1);
-        }
-    }
-#endif
 
     /* test loop */
     last_time = get_time_ms();
@@ -381,11 +323,8 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
         char *buf_wr;
         char *buf_rd;
 
-        // XXX: these individual read/write operations are very expensive
-        //      when backed by a GPU buffer, so disable data verification.
-
         /* write tx-buffers */
-        while (cuda_device_num == -1) {
+        while (1) {
             /* get buffer */
             buf_wr = litepcie_dma_next_write_buffer(&dma);
 
@@ -398,7 +337,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
         }
 
         /* read/check rx-buffers */
-        while (cuda_device_num == -1) {
+        while (1) {
             /* get buffer */
             buf_rd = litepcie_dma_next_read_buffer(&dma);
 
@@ -406,8 +345,8 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
             if (!buf_rd)
                 break;
 
-            /* break until first full dma loop */
-            if (dma.writer_hw_count < DMA_BUFFER_COUNT)
+            /* skip the first 128 dma loop */
+            if (dma.writer_hw_count < 128*DMA_BUFFER_COUNT)
                 break;
 
             if (run) {
@@ -442,7 +381,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
 
         /* statistics */
         int64_t duration = get_time_ms() - last_time;
-        if (duration > 200) {
+        if (run & (duration > 200)) {
             if (i % 10 == 0)
                 printf("\e[1mDMA_SPEED(Gbps)\tTX_BUFFERS\tRX_BUFFERS\tDIFF\tERRORS\e[0m\n");
             i++;
@@ -514,11 +453,11 @@ static void help(void)
            "\n"
            "options:\n"
            "-h                                Help\n"
-           "-c device_num                     Select the FPGA device (default = 0)\n"
-           "-g device_num                     Select the GPU device (default = -1, disabled)\n"
+           "-c device_num                     Select the device (default = 0)\n"
            "-z                                Enable zero-copy DMA mode\n"
            "-e                                Use external loopback (default = internal)\n"
            "-w data_width                     Width of data bus (default = 16)\n"
+           "-a                                Automatic DMA RX-Delay calibration\n"
            "\n"
            "available commands:\n"
            "info                              Board information\n"
@@ -544,18 +483,18 @@ int main(int argc, char **argv)
     static uint8_t litepcie_device_zero_copy;
     static uint8_t litepcie_device_external_loopback;
     static int litepcie_data_width;
+    static int litepcie_auto_rx_delay;
 
 
     litepcie_device_num = 0;
     litepcie_data_width = 16;
+    litepcie_auto_rx_delay = 0;
     litepcie_device_zero_copy = 0;
     litepcie_device_external_loopback = 0;
 
-    cuda_device_num = -1;
-
     /* parameters */
     for (;;) {
-        c = getopt(argc, argv, "hc:g:w:ze");
+        c = getopt(argc, argv, "hc:w:zea");
         if (c == -1)
             break;
         switch(c) {
@@ -571,11 +510,11 @@ int main(int argc, char **argv)
         case 'z':
             litepcie_device_zero_copy = 1;
             break;
-        case 'g':
-            cuda_device_num = atoi(optarg);
-            break;
         case 'e':
             litepcie_device_external_loopback = 1;
+            break;
+        case 'a':
+            litepcie_auto_rx_delay = 1;
             break;
         default:
             exit(1);
@@ -593,7 +532,11 @@ int main(int argc, char **argv)
     if (!strcmp(cmd, "info"))
         info();
     else if (!strcmp(cmd, "dma_test"))
-        dma_test(litepcie_device_zero_copy, litepcie_device_external_loopback, litepcie_data_width);
+        dma_test(
+            litepcie_device_zero_copy,
+            litepcie_device_external_loopback,
+            litepcie_data_width,
+            litepcie_auto_rx_delay);
     else if (!strcmp(cmd, "scratch_test"))
         scratch_test();
 #ifdef CSR_UART_XOVER_RXTX_ADDR
