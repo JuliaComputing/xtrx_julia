@@ -59,23 +59,7 @@ void litepcie_release_dma(int fd, uint8_t reader, uint8_t writer) {
     checked_ioctl(fd, LITEPCIE_IOCTL_LOCK, &m);
 }
 
-/* init */
-
-void litepcie_dma_init_cpu(int fd) {
-    struct litepcie_ioctl_dma_init m;
-    m.use_gpu = 0;
-    checked_ioctl(fd, LITEPCIE_IOCTL_DMA_INIT, &m);
-}
-
-void litepcie_dma_init_gpu(int fd, void* addr, size_t size) {
-    struct litepcie_ioctl_dma_init m;
-    m.use_gpu = 1;
-    m.gpu_addr = addr;
-    m.gpu_size = size;
-    checked_ioctl(fd, LITEPCIE_IOCTL_DMA_INIT, &m);
-}
-
-int litepcie_dma_init(struct litepcie_dma_ctrl *dma, const char *device_name, uint8_t zero_copy, uint8_t gpu)
+int litepcie_dma_init(struct litepcie_dma_ctrl *dma, const char *device_name, uint8_t zero_copy)
 {
     dma->reader_hw_count = 0;
     dma->reader_sw_count = 0;
@@ -93,17 +77,6 @@ int litepcie_dma_init(struct litepcie_dma_ctrl *dma, const char *device_name, ui
     if (dma->fds.fd < 0) {
         fprintf(stderr, "Could not open device\n");
         return -1;
-    }
-
-    if (gpu) {
-        checked_cuda_call(cuMemAlloc(&dma->gpu_buf, 2*DMA_BUFFER_TOTAL_SIZE));
-
-        unsigned int flag = 1;
-        checked_cuda_call(cuPointerSetAttribute(&flag, CU_POINTER_ATTRIBUTE_SYNC_MEMOPS, dma->gpu_buf));
-
-        litepcie_dma_init_gpu(dma->fds.fd, (void*)dma->gpu_buf, 2*DMA_BUFFER_TOTAL_SIZE);
-    } else {
-        litepcie_dma_init_cpu(dma->fds.fd);
     }
 
     /* request dma reader and writer */

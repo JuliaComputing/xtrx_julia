@@ -16,7 +16,7 @@ void dma_test(const char *device_name, uint8_t zero_copy)
     int64_t stat_last_time = get_time_ms();
     static uint64_t stat_read_counter, stat_write_counter;
 
-    litepcie_dma_init(&dma, device_name, zero_copy, 0);
+    litepcie_dma_init(&dma, device_name, zero_copy);
 
     while (1)
     {
