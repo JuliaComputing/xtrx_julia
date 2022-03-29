@@ -46,19 +46,19 @@ void customLogHandler(const LMS7_log_level_t level, const char *message) {
  * Constructor
  **********************************************************************/
 
-void dma_init_cpu(int fd) {
-    struct litepcie_ioctl_dma_init m;
-    m.use_gpu = 0;
-    checked_ioctl(fd, LITEPCIE_IOCTL_DMA_INIT, &m);
-}
-
-void dma_init_gpu(int fd, void *addr, size_t size) {
-    struct litepcie_ioctl_dma_init m;
-    m.use_gpu = 1;
-    m.gpu_addr = (uint64_t)addr;
-    m.gpu_size = size;
-    checked_ioctl(fd, LITEPCIE_IOCTL_DMA_INIT, &m);
-}
+//void dma_init_cpu(int fd) {
+//    struct litepcie_ioctl_dma_init m;
+//    m.use_gpu = 0;
+//    checked_ioctl(fd, LITEPCIE_IOCTL_DMA_INIT, &m);
+//}
+//
+//void dma_init_gpu(int fd, void *addr, size_t size) {
+//    struct litepcie_ioctl_dma_init m;
+//    m.use_gpu = 1;
+//    m.gpu_addr = (uint64_t)addr;
+//    m.gpu_size = size;
+//    checked_ioctl(fd, LITEPCIE_IOCTL_DMA_INIT, &m);
+//}
 
 SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
     : _fd(-1), _lms(NULL), _masterClockRate(1.0e6) {
@@ -174,24 +174,24 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
         else
             throw std::runtime_error("invalid device");
     }
-    switch (_dma_target) {
-    case TargetDevice::CPU:
-        dma_init_cpu(_fd);
-        _dma_buf = NULL;
-        break;
-    case TargetDevice::GPU:
-        size_t dma_buffer_total_size =
-            _dma_mmap_info.dma_tx_buf_count * _dma_mmap_info.dma_tx_buf_size +
-            _dma_mmap_info.dma_rx_buf_count * _dma_mmap_info.dma_rx_buf_size;
-        checked_cuda_call(
-            cuMemAlloc((CUdeviceptr *)&_dma_buf, dma_buffer_total_size));
-
-        unsigned int flag = 1;
-        checked_cuda_call(cuPointerSetAttribute(
-            &flag, CU_POINTER_ATTRIBUTE_SYNC_MEMOPS, (CUdeviceptr)_dma_buf));
-
-        dma_init_gpu(_fd, _dma_buf, dma_buffer_total_size);
-    }
+    //switch (_dma_target) {
+    //case TargetDevice::CPU:
+    //    dma_init_cpu(_fd);
+    //    _dma_buf = NULL;
+    //    break;
+    //case TargetDevice::GPU:
+    //    size_t dma_buffer_total_size =
+    //        _dma_mmap_info.dma_tx_buf_count * _dma_mmap_info.dma_tx_buf_size +
+    //        _dma_mmap_info.dma_rx_buf_count * _dma_mmap_info.dma_rx_buf_size;
+    //    checked_cuda_call(
+    //        cuMemAlloc((CUdeviceptr *)&_dma_buf, dma_buffer_total_size));
+//
+    //    unsigned int flag = 1;
+    //    checked_cuda_call(cuPointerSetAttribute(
+    //        &flag, CU_POINTER_ATTRIBUTE_SYNC_MEMOPS, (CUdeviceptr)_dma_buf));
+//
+    //    dma_init_gpu(_fd, _dma_buf, dma_buffer_total_size);
+    //}
 
     // NOTE: if initialization misses a setting/register, try experimenting in
     //       LimeGUI and loading that register dump here
