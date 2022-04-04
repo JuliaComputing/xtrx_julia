@@ -50,8 +50,6 @@ _io = [
         IOStandard("LVCMOS25")
     ),
 
-    # Power-Down.
-    ("pwrdwn_n", 0, Pins("R19"), IOStandard("LVCMOS25")),
 
     # I2C buses.
     ("i2c", 0,
@@ -85,6 +83,7 @@ _io = [
     ("gpio", 0,
         Subsignal("iovcc_sel",  Pins("V19")),
         Subsignal("en_smsigio", Pins("D17")),
+        Subsignal("pwrdwn_n", Pins("R19")),
         IOStandard("LVCMOS25")
     ),
 

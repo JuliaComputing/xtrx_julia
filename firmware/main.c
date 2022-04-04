@@ -122,6 +122,10 @@ static void help(void)
 	puts("rfic_test          - Test RFIC");
 	puts("digi_1v8           - Set Digital Interface to 1.8V");
 	puts("xtrx_init          - Initialize XTRX");
+	puts("pwrdwn_on");
+	puts("pwrdwn_off");
+	puts("pmic_dump");
+	puts("vctcxo_init");
 }
 
 /*-----------------------------------------------------------------------*/
@@ -201,6 +205,41 @@ static void vctcxo_test(int n)
 	}
 }
 
+
+static void pwrdwn_off(void){
+	printf("pwrdwn_n: 1");
+	gpio_control_pwrdwn_n_write(1);
+}
+
+static void pwrdwn_on(void){
+	printf("pwrdwn_n: 0");
+	gpio_control_pwrdwn_n_write(0);
+}
+
+
+static void vctcxo_init(void){
+	printf("\n");
+	printf("VCTCXO Initialization...\n");
+	printf("----------------------\n");
+	printf("Using VCTCXO Clk.\n");
+	vctcxo_control_write(XTRX_VCTCXO_CLK);
+}
+
+static void pmic_dump(void) {
+	unsigned char adr;
+	unsigned char dat;
+
+	printf("PMIC-LMS Dump...\n");
+	for (adr=0; adr<32; adr++) {
+		i2c0_read(LP8758_I2C_ADDR, adr, &dat, 1, true);
+		printf("0x%02x: 0x%02x\n", adr, dat);
+	}
+	printf("PMIC-FPGA Dump...\n");
+	for (adr=0; adr<32; adr++) {
+		i2c1_read(LP8758_I2C_ADDR, adr, &dat, 1, true);
+		printf("0x%02x: 0x%02x\n", adr, dat);
+	}
+}
 
 /*-----------------------------------------------------------------------*/
 /* Digital Interface                                                     */
@@ -312,20 +351,6 @@ static int xtrx_init(void)
 	dat = 0xfb;
 	i2c1_write(LP8758_I2C_ADDR, adr, &dat, 1);
 
-
-#if 0
-	printf("PMIC-LMS Dump...\n");
-	for (adr=0; adr<32; adr++) {
-		i2c0_read(LP8758_I2C_ADDR, adr, &dat, 1, true);
-		printf("0x%02x: 0x%02x\n", adr, dat);
-	}
-	printf("PMIC-FPGA Dump...\n");
-	for (adr=0; adr<32; adr++) {
-		i2c1_read(LP8758_I2C_ADDR, adr, &dat, 1, true);
-		printf("0x%02x: 0x%02x\n", adr, dat);
-	}
-#endif
-
 	printf("\n");
 	printf("VCTCXO Initialization...\n");
 	printf("----------------------\n");
@@ -380,6 +405,14 @@ static void console_service(void)
 		digi_1v8();
 	else if(strcmp(token, "xtrx_init") == 0)
 		xtrx_init();
+	else if(strcmp(token, "pwrdwn_on") == 0)
+		pwrdwn_on();
+	else if(strcmp(token, "pwrdwn_off") == 0)
+		pwrdwn_off();
+	else if(strcmp(token, "vctcxo_init") == 0)
+		vctcxo_init();
+	else if(strcmp(token, "pmic_dump") == 0)
+		pmic_dump();
 	prompt();
 }
 
