@@ -269,9 +269,8 @@ static void vctcxo_dac_set(int value) {
 		i2c1_write(MCP4725_I2C_ADDR, cmd, dat, 1);
 	/* Rev5 is equipped with a DAC60501 */
 	} else {
-		value = value << 4;
-		dat[0] = value & 0xff;
-		dat[1] = (value & 0xff00) >> 4;
+		dat[0] = value >> 4;
+		dat[1] = value << 4;
 		cmd = 0x08;
 		i2c1_write(DAC60501_I2C_ADDR, cmd, dat, 2);
 	}
