@@ -37,7 +37,10 @@
 #include "csr.h"
 #include "config.h"
 #include "flags.h"
+
+#ifdef NVIDIA
 #include "nv-p2p.h"
+#endif
 
 //#define DEBUG_CSR
 //#define DEBUG_MSI
@@ -105,8 +108,10 @@ struct litepcie_device {
 
 	enum DMASource dma_source;
 	uint64_t gpu_virt_start;	// start page address of the virtual memory
+	#ifdef NVIDIA
 	nvidia_p2p_page_table_t *gpu_page_table;
 	nvidia_p2p_dma_mapping_t *gpu_dma_mapping;
+	#endif
 };
 
 struct litepcie_chan_priv {
@@ -233,6 +238,9 @@ static int litepcie_dma_deinit_cpu(struct litepcie_device *s)
 #define GPU_PAGE_SIZE		(1UL << GPU_PAGE_SHIFT)
 #define GPU_PAGE_OFFSET		(GPU_PAGE_SIZE - 1)
 #define GPU_PAGE_MASK		(~GPU_PAGE_OFFSET)
+
+
+#ifdef NVIDIA
 
 // callback for when the GPU mapping needs to be revoked earlier,
 // e.g. because the userspace process exited, freed the buffer, or
@@ -383,6 +391,8 @@ do_unlock_pages:
 do_exit:
 	return error;
 }
+
+#endif
 
 static int litepcie_dma_writer_start(struct litepcie_device *s, int chan_num)
 {
@@ -651,8 +661,10 @@ static int litepcie_release(struct inode *inode, struct file *file)
 	/* Free DMA sources */
 	if (chan->litepcie_dev->dma_source == CPU)
 		litepcie_dma_deinit_cpu(chan->litepcie_dev);
+	#ifdef NVIDIA
 	else if (chan->litepcie_dev->dma_source == GPU)
 		litepcie_dma_deinit_gpu(chan->litepcie_dev);
+	#endif
 
 	kfree(chan_priv);
 
@@ -969,9 +981,11 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 		}
 
 		/* allocate all dma buffers */
+		#ifdef NVIDIA
 		if (m.use_gpu)
 			ret = litepcie_dma_init_gpu(chan->litepcie_dev, m.gpu_addr, m.gpu_size);
 		else
+		#endif
 			ret = litepcie_dma_init_cpu(chan->litepcie_dev);
 
 		break;
