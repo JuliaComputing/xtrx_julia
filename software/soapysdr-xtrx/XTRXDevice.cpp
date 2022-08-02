@@ -136,22 +136,35 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
     LMS7002M_sxx_enable(_lms, LMS_RX, true);
     LMS7002M_sxx_enable(_lms, LMS_TX, true);
 
+    // Enable RF Switches
+    litepcie_writel(_fd, CSR_RF_SWITCHES_TX_ADDR, 0b1);
+    litepcie_writel(_fd, CSR_RF_SWITCHES_RX_ADDR, 0b11);
+
     // XTRX-specific configuration
     LMS7002M_ldo_enable(_lms, true, LMS7002M_LDO_ALL);
     LMS7002M_xbuf_share_tx(_lms, true);
+    LMS7002M_sxt_to_sxr(_lms, true);
 
     // turn the clocks on (tested frequencies: 61.44MHZ, 122.88MHZ)
+    //this->setMasterClockRate(61.44e6);
     this->setMasterClockRate(122.88e6);
+
+    //LMS7002M_tbb_enable_loopback(_lms, LMS_CHAB, LMS7002M_TBB_MAIN_TBB, false);
+    //LMS7002M_rbb_select_input(_lms, LMS_CHAB, LMS7002M_RBB_BYP_LB);
+
+    //tone from tx dsp
+    //LMS7002M_txtsp_tsg_tone(_lms, LMS_CHA);
+    //LMS7002M_txtsp_tsg_tone(_lms, LMS_CHB);
 
     // some defaults to avoid throwing
     _cachedSampleRates[SOAPY_SDR_RX] = 1e6;
     _cachedSampleRates[SOAPY_SDR_TX] = 1e6;
     for (size_t i = 0; i < 2; i++) {
-        _cachedFreqValues[SOAPY_SDR_RX][i]["RF"] = 1e9;
-        _cachedFreqValues[SOAPY_SDR_TX][i]["RF"] = 1e9;
+        _cachedFreqValues[SOAPY_SDR_RX][i]["RF"] = 5e7;
+        _cachedFreqValues[SOAPY_SDR_TX][i]["RF"] = 5e7;
         _cachedFreqValues[SOAPY_SDR_RX][i]["BB"] = 0;
         _cachedFreqValues[SOAPY_SDR_TX][i]["BB"] = 0;
-        this->setAntenna(SOAPY_SDR_RX, i, "LNAW");
+        this->setAntenna(SOAPY_SDR_RX, i, "LNAH");
         this->setAntenna(SOAPY_SDR_TX, i, "BAND1");
         this->setGain(SOAPY_SDR_RX, i, "LNA", 0.0);
         this->setGain(SOAPY_SDR_RX, i, "TIA", 0.0);
@@ -406,8 +419,8 @@ std::vector<std::string> SoapyXTRX::listGains(const int direction,
                                               const size_t) const {
     std::vector<std::string> gains;
     if (direction == SOAPY_SDR_RX) {
-        gains.push_back("LNA");
         gains.push_back("TIA");
+        gains.push_back("LNA");
         gains.push_back("PGA");
     }
     if (direction == SOAPY_SDR_TX) {

@@ -148,7 +148,9 @@ function dma_test(use_gpu=false)
     finalize(dev)
 end
 
-dma_test(false)
+dma_test(false) # CPU
+
+dma_test(false) #CPU
 
 using CUDA
 # GPU: initialize the device# GPU: initialize the device
@@ -157,5 +159,5 @@ CuArray(UInt32[1]) .= 1
 # XXX: actually creating an array to initialize CUDA won't be required anymore
 #      in the next version of CUDA.jl, but it helps to ensure code is compiled
 
-dma_test(true)
+dma_test(true) #GPU
 

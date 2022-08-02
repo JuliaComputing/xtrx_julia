@@ -120,6 +120,7 @@ function dma_test()
                 @assert err > 0
                 if handle >= wr_nbufs
                     if run
+                        global _buff = copy(unsafe_wrap(Array{UInt16}, buffs[1], 10))
                         errors += check_pn_data(buffs[1], rd_sz, rd_total_sz)
                     else
                         errors_min = typemax(Int)

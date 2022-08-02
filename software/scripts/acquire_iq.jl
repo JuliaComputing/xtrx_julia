@@ -15,15 +15,23 @@ SoapySDR.register_log_handler()
 function dma_test()
     # open the first device
     devs = Devices()
-    dev = Device(devs[1])
+    dev_args = devs[1]
+    dev_args["ini"] = joinpath(@__DIR__, "../configs/xtrx_limesdr.ini")
+    dev = Device(dev_args)
+
+    #dev.master_clock_rate = 61.44e6
+    #@show dev.master_clock_rate
+
+    #SoapySDR.SoapySDRDevice_writeSetting(dev, "LOOPBACK_ENABLE", "TRUE")
 
     # get the RX and TX channels
     # XX We suspect they are interlaced somehow, so analyize
     chan_rx = dev.rx[1]
     chan_tx = dev.tx[1]
-
+    println(chan_rx)
+    println(chan_rx)
     # open RX and TX streams
-    format = chan_rx.native_stream_format
+    format = Complex{Int16} #chan_rx.native_stream_format
     fullscale = chan_tx.fullscale
     stream_rx = SoapySDR.Stream(format, dev.rx)
     stream_tx = SoapySDR.Stream(format, dev.tx)
@@ -52,38 +60,46 @@ function dma_test()
     # Setup transmission/recieve parameters
     # XXX: Sometimes this needs to be done twice to not error???
     for cr in dev.rx
-        cr.bandwidth = 500u"kHz" # 200u"kHz"
-        cr.frequency = 2.498u"GHz"
-        #cr.gain = 2u"dB"
-        cr.sample_rate = 1u"MHz"
+        #for ge in cr.gain_elements
+        #    cr[ge] = 12u"dB"
+        #end
+        cr.bandwidth = 1u"MHz" # 200u"kHz"
         @show cr.bandwidth
+        cr.frequency = 2.498u"GHz"
         @show cr.frequency
-        @show cr.sample_rate
+        cr.gain = 0u"dB"
         @show cr.gain
+        cr.sample_rate = 2u"MHz"
+        @show cr.sample_rate
+        println(cr)
     end
 
     for ct in dev.tx
-        ct.bandwidth = 3.1u"MHz" #2u"MHz"
-        ct.frequency = 2.498u"GHz"
-        #ct.gain = 20u"dB"
-        ct.sample_rate = 1u"MHz"
+        for ge in ct.gain_elements
+            ct[ge] = -20u"dB"
+        end
+        ct.bandwidth = 1u"MHz" #2u"MHz"
         @show ct.bandwidth
+        ct.frequency = 2.498u"GHz"
         @show ct.frequency
+        #ct.gain = 20u"dB"
+        #@show ct.gain
+        ct.sample_rate = 2u"MHz"
         @show ct.sample_rate
-        @show ct.gain
+        println(ct)
     end
-
     # prepare some data to send:
-    rate = 10
+    rate = 20
     samples = mtu*wr_nbufs
-    t = (1:round(Int, samples))./samples
-    @show length(t)
-    data_tx = format.(round.(sin.(2π.*t.*rate).*fullscale/4), 0)
-    data_tx_zeros = zeros(format, length(data_tx))
+    t = (1:div(samples,1))./samples
+    data_tx = zeros(format, samples)
+    #data_tx[1:2:end] = format.(round.(sin.(2π.*t.*rate).*fullscale/4), 0)
+    # Transmit on both real and imaginary as perperdicular signals
+    # to ensure we always have a signal on one of I or Q
+    #data_tx = convert.(format, round.(cis.(2π.*t.*rate).*fullscale/4))
 
     iq_data = format[]
 
-    run = false
     try
 
         written_buffs = 0
@@ -97,7 +113,7 @@ function dma_test()
         while written_buffs < wr_nbufs
             buffs = Ptr{format}[C_NULL]
             err, handle = SoapySDR.SoapySDRDevice_acquireWriteBuffer(dev, stream_tx, buffs, 0)
-            if err == SoapySDR.SOAPY_SDR_TIMEOUT
+            if err == SoapySDR.SOAPY_SDR_TIMEOUT # all buffers are full
                 break
             elseif err == SoapySDR.SOAPY_SDR_UNDERFLOW
                 err = 1 # keep going
@@ -126,7 +142,7 @@ function dma_test()
             SoapySDR.SoapySDRDevice_releaseReadBuffer(dev, stream_rx, handle)
             read_buffs += 1
         end
-        @show read_buffs, written_buffs
+        @assert read_buffs == written_buffs
 
     finally
         SoapySDR.deactivate!(stream_rx)
@@ -143,8 +159,56 @@ iq_data, data_tx = dma_test()
 
 using Plots
 
-plt = plot(real.(iq_data)[2:2:end])
-plot!(real.(iq_data)[1:2:end])
-plot!(real.(data_tx))
+function get_bit(word::Unsigned, word_length::Int, bit_number::Int)
+    Bool(get_bits(word, word_length, bit_number, 1))
+end
 
-savefig("data_$(Int(round(time()))).png")
+function get_bits(word::Unsigned, word_length::Int, start::Int, length::Int)
+    Int((word >> (word_length - start - length + 1)) & (UInt(1) << UInt(length) - UInt(1)))
+end
+
+"""
+e.g. 4 bit twos complement inside 8 bit byte
+00001000 = -8
+00000111 = 8
+becomes:
+11111000 = -8
+
+"""
+function get_two_complement_num(word::Unsigned, word_length::Int, start::Int, length::Int)
+    sign = get_bit(word, word_length, start)
+    value = get_bits(word, word_length, start, length)
+    if sign
+        return -1 << length + value
+    else
+        return value
+    end
+end
+
+# correct the data
+iq_data_flat = reinterpret(Int16, iq_data)
+for idx in 1:length(iq_data_flat)
+    if (iq_data_flat[idx] > 2048)
+        iq_data_flat[idx] = iq_data_flat[idx] - 4096
+    end 
+end
+iq_data = reinterpret(Complex{Int16}, iq_data_flat)
+
+
+
+# Pull out real and imaginary for each channels
+# e.g.
+# (ch1_r, ch1_i), (ch2_r, ch2_i) , ...
+
+len = length(iq_data)
+
+plt = plot(imag.(iq_data)[2:2:len], label="ch1_i")
+plot!(imag.(iq_data)[1:2:len], label="ch2_i")
+plot!(real.(iq_data)[2:2:len], label="ch1_r")
+plot!(real.(iq_data)[1:2:len], label="ch2_r")
+plot!(real.(data_tx)[1:div(len,2)], label="data_tx_r")
+plot!(imag.(data_tx)[1:div(len,2)], label="data_tx_i")
+
+savefig("plots/data_$(Int(round(time()))).png")
+
+#display(plt)
