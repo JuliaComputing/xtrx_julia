@@ -32,6 +32,6 @@ class VCTCXO(Module, AutoCSR):
         self.comb += self.cd_txco.clk.eq(pads.clk)
 
         # Cycles Count.
-        cycles = Signal(32)
-        self.sync.vctcxo += cycles.eq(cycles + 1)
-        self.sync += If(self.cycles_latch.re, self.cycles.status.eq(cycles))
+        self.cycles_count = Signal(32)
+        self.sync.vctcxo += self.cycles_count.eq(self.cycles_count + 1)
+        self.sync += If(self.cycles_latch.re, self.cycles.status.eq(self.cycles_count))

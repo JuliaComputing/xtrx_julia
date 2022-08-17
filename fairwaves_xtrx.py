@@ -85,7 +85,7 @@ class BaseSoC(SoCCore):
         "rf_switches" : 25,
         "lms7002m"    : 26,
     }
-    def __init__(self, sys_clk_freq=int(125e6), with_cpu=True, cpu_firmware=None, with_jtagbone=True, with_analyzer=False):
+    def __init__(self, sys_clk_freq=int(125e6), with_cpu=True, cpu_firmware=None, with_jtagbone=True, with_analyzer=True):
         platform = fairwaves_xtrx.Platform()
 
         # SoCCore ----------------------------------------------------------------------------------
@@ -208,6 +208,7 @@ class BaseSoC(SoCCore):
                 self.lms7002m.rx_frame,
                 self.lms7002m.rx_aligned,
                 self.lms7002m.rx_data,
+                self.vctcxo.cycles_count
             ]
             self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
                 depth        = 128,
