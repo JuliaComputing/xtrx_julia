@@ -462,10 +462,42 @@ static int xtrx_init(void)
 	dat = 0x88;
 	i2c0_write(LP8758_I2C_ADDR, adr, &dat, 1);
 
+	// Check that the PMIC is alive
+	if (assert_pmic_alive() != 0)
+	{
+		return -1;
+	}
+
+	/* Later
 	printf("PMIC-LMS: Set Buck1 to 3280mV.\n");
 	adr = 0x0c;
 	dat = 0xfb;
 	i2c0_write(LP8758_I2C_ADDR, adr, &dat, 1);
+	*/
+
+	printf("PMIC-LMS: Disable Buck0.\n");
+	adr = 0x02;
+	dat = 0xc8;
+	i2c0_write(LP8758_I2C_ADDR, adr, &dat, 1);
+
+	printf("PMIC-LMS: Disable Buck2.\n");
+	adr = 0x06;
+	dat = 0xc8;
+	i2c0_write(LP8758_I2C_ADDR, adr, &dat, 1);
+
+	printf("PMIC-LMS: Disable Buck3.\n");
+	adr = 0x08;
+	dat = 0xc8;
+	i2c0_write(LP8758_I2C_ADDR, adr, &dat, 1);
+
+	busy_wait(100);
+
+	printf("PMIC-LMS: Enable Buck1.\n");
+	adr = 0x04;
+	dat = 0x88;
+	i2c0_write(LP8758_I2C_ADDR, adr, &dat, 1);
+
+	busy_wait(100);
 
 	// lp8758_set(dev, XTRX_I2C_PMIC_LMS, BUCK0_CTRL1, PMIC_CH_DISABLE);
 	printf("PMIC-LMS: Disable Buck0.\n");
@@ -485,6 +517,13 @@ static int xtrx_init(void)
 	dat = 0xc8;
 	i2c0_write(LP8758_I2C_ADDR, adr, &dat, 1);
 
+	busy_wait(100);
+
+	printf("PMIC-FPGA: Set Buck1 to 3280mV.\n");
+	adr = 0x0c;
+	dat = 0xfb;
+	i2c1_write(LP8758_I2C_ADDR, adr, &dat, 1);
+
 	printf("PMIC-LMS: Set Buck0 to 1880mV.\n");
 	adr = 0x0a;
 	dat = 0xb5;
@@ -500,10 +539,16 @@ static int xtrx_init(void)
 	dat = 0x92;
 	i2c0_write(LP8758_I2C_ADDR, adr, &dat, 1);
 
-	busy_wait(10);
+	busy_wait(100);
+
+	printf("PMIC-LMS: Enable Buck1.\n");
+	adr = 0x04;
+	dat = 0x88;
+	i2c0_write(LP8758_I2C_ADDR, adr, &dat, 1);
 
 	// Check that the PMIC is alive
-	if (assert_pmic_alive() != 0) {
+	if (assert_pmic_alive() != 0)
+	{
 		return -1;
 	}
 
@@ -522,9 +567,9 @@ static int xtrx_init(void)
 	dat = 0x88;
 	i2c0_write(LP8758_I2C_ADDR, adr, &dat, 1);
 
-	printf("PMIC-FPGA: Set Buck1 to 3280mV.\n");
+	printf("PMIC-FPGA: Set Buck1 to 1880mV.\n");
 	adr = 0x0c;
-	dat = 0xfb;
+	dat = 0xb1;
 	i2c1_write(LP8758_I2C_ADDR, adr, &dat, 1);
 
 	// Give the bucks some time to settle before bringing up the LMS7002m
@@ -558,7 +603,8 @@ static int xtrx_init(void)
 	busy_wait(100);
 	printf("LMS7002M Reset.\n");
 	lms7002m_control_write(LMS7002M_RESET);
-	busy_wait(10);
+	busy_wait(100);
+
 	printf("LMS7002M TX/RX Enable.\n");
 	lms7002m_control_write(LMS7002M_TX_ENABLE | LMS7002M_RX_ENABLE);
 
