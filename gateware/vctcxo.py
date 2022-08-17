@@ -18,14 +18,21 @@ class VCTCXO(Module, AutoCSR):
                 ("``0b0``", "Use VCTCXO Clk."),
                 ("``0b1``", "Use External Clk.")
             ], reset=0),
+            CSRField("en", size=1, offset=1, values=[
+                ("``0b0``", "Disable VCTCXO"),
+                ("``0b1``", "Enable VCTCXO")
+            ], reset=0),
         ])
         self.cycles_latch = CSR()
-        self.cycles       = CSRStatus(32)
+        self.cycles       = CSRStatus(32, reset=0)
 
         # # #
 
         # Drive Control Pins.
-        self.comb += pads.sel.eq(self.control.fields.sel)
+        self.comb += [
+            pads.sel.eq(self.control.fields.sel),
+            pads.en.eq(self.control.fields.en)
+        ]
 
         # Clock Input.
         self.clock_domains.cd_txco = ClockDomain("vctcxo")

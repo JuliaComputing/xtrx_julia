@@ -117,10 +117,11 @@ class BaseSoC(SoCCore):
             pads         = platform.request_all("user_led"),
             sys_clk_freq = sys_clk_freq
         )
-        self.submodules.leds2 = LedChaser(
-            pads         = platform.request_all("user_led2"),
-            sys_clk_freq = sys_clk_freq
-        )
+        #self.submodules.leds2 = LedChaser(
+        #    pads         = platform.request_all("user_led2"),
+        #    sys_clk_freq = sys_clk_freq
+        #)
+
 
         # ICAP -------------------------------------------------------------------------------------
         self.submodules.icap = ICAP()
@@ -145,9 +146,6 @@ class BaseSoC(SoCCore):
             with_dma_loopback  = True,
             with_msi           = True
         )
-
-        # I2C Peripherals --------------------------------------------------------------------------
-        self.comb += platform.request("pwrdwn_n").eq(1) # Enable.
 
         # I2C Bus0:
         # - Temperature Sensor (TMP108  @ 0x4a).
@@ -196,6 +194,10 @@ class BaseSoC(SoCCore):
         self.comb += self.pcie_dma0.source.connect(self.lms7002m.sink)
         self.comb += self.lms7002m.source.connect(self.pcie_dma0.sink)
         platform.add_false_path_constraints(self.crg.cd_sys.clk, self.lms7002m.cd_rfic.clk)
+
+        self.comb += [
+            self.platform.request_all("user_led2").eq(self.vctcxo.cycles_count[22:25])
+        ]
 
         # Analyzer ---------------------------------------------------------------------------------
         if with_analyzer:

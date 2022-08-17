@@ -296,6 +296,7 @@ static void vctcxo_test(int n)
 
 		// Pulse cycle count into status register, then read it
 		vctcxo_cycles_latch_write(1);
+		vctcxo_cycles_latch_write(1);
 		before = vctcxo_cycles_read();
 
 		// Wait for 1 second
@@ -303,8 +304,9 @@ static void vctcxo_test(int n)
 
 		// Pulse cycle count into status register, then read it
 		vctcxo_cycles_latch_write(1);
+		vctcxo_cycles_latch_write(1);
 		after = vctcxo_cycles_read();
-
+		printf("%d: %d, %d\n", i, after, before);
 		// Calculate how many cycles we observed in the last second
 		vctcxo_cycles[i] = after - before;
 	}
@@ -497,8 +499,15 @@ static void console_service(void)
 		i2c_test();
 	else if(strcmp(token, "temp_test") == 0)
 		temp_test();
-	else if(strcmp(token, "vctcxo_test") == 0)
+	else if(strcmp(token, "vctcxo_test") == 0) {
+		printf("enable pin: %d\n", vctcxo_control_en_read());
+		vctcxo_control_en_write(1);
+		printf("enable pin: %d\n", vctcxo_control_en_read());
 		vctcxo_test(16);
+		vctcxo_control_en_write(0);
+		printf("enable pin: %d\n", vctcxo_control_en_read());
+		vctcxo_test(16);
+	}
 	else if(strcmp(token, "digi_1v8") == 0)
 		digi_1v8();
 	else if(strcmp(token, "xtrx_init") == 0)
