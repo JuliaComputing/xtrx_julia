@@ -195,9 +195,9 @@ class BaseSoC(SoCCore):
         self.comb += self.lms7002m.source.connect(self.pcie_dma0.sink)
         platform.add_false_path_constraints(self.crg.cd_sys.clk, self.lms7002m.cd_rfic.clk)
 
-        self.comb += [
-            self.platform.request_all("user_led2").eq(self.vctcxo.cycles_count[22:25])
-        ]
+        #self.comb += [
+        #    self.platform.request_all("user_led2").eq(self.vctcxo.cycles_count[22:25])
+        #]
 
         # Analyzer ---------------------------------------------------------------------------------
         if with_analyzer:

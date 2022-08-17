@@ -31,7 +31,7 @@ class VCTCXO(Module, AutoCSR):
         # Drive Control Pins.
         self.comb += [
             pads.sel.eq(self.control.fields.sel),
-            pads.en.eq(self.control.fields.en)
+            pads.en.eq(1)
         ]
 
         # Clock Input.
