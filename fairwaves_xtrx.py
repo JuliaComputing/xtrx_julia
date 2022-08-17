@@ -84,6 +84,7 @@ class BaseSoC(SoCCore):
         "vctcxo"      : 24,
         "rf_switches" : 25,
         "lms7002m"    : 26,
+        "aux"         : 27,
     }
     def __init__(self, sys_clk_freq=int(125e6), with_cpu=True, cpu_firmware=None, with_jtagbone=True, with_analyzer=True):
         platform = fairwaves_xtrx.Platform()
@@ -203,18 +204,24 @@ class BaseSoC(SoCCore):
         if with_analyzer:
             #analyzer_signals = [platform.lookup_request("lms7002m")]
             analyzer_signals = [
-                self.lms7002m.sink,
-                self.lms7002m.source,
-                self.lms7002m.tx_frame,
-                self.lms7002m.tx_data,
-                self.lms7002m.rx_frame,
-                self.lms7002m.rx_aligned,
-                self.lms7002m.rx_data,
-                self.vctcxo.cycles_count
+                #self.lms7002m.sink,
+                #self.lms7002m.source,
+                #self.lms7002m.tx_frame,
+                #self.lms7002m.tx_data,
+                #self.lms7002m.rx_frame,
+                #self.lms7002m.rx_aligned,
+                #self.lms7002m.rx_data,
+                self.vctcxo.cycles.re,
+                self.vctcxo.cycles_count,
+                self.vctcxo.cycles_latch.r,
+                self.vctcxo.cycles_latch.re,
+                self.vctcxo.cycles.status,
+                self.vctcxo.control.fields.sel,
+                self.vctcxo.control.fields.en
             ]
             self.submodules.analyzer = LiteScopeAnalyzer(analyzer_signals,
-                depth        = 128,
-                clock_domain = "rfic",
+                depth        = 512,
+                clock_domain = "vctcxo",
                 csr_csv      = "analyzer.csv"
             )
 
