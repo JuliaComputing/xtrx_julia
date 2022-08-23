@@ -3,7 +3,8 @@
 using SoapySDR, Printf, DSP, FFTW, Statistics
 
 # Helper for turning a matrix into a tuple of views, for use with the SoapySDR API.
-split_matrix(m::Matrix{ComplexF32}) = tuple(collect(view(m, :, idx) for idx in 1:size(m,2))...)
+split_matrix(m::Matrix{T}) where {T} = tuple(collect(view(m, :, idx) for idx in 1:size(m,2))...)
+ntuple_copy(t::NTuple{N}) where {N} = ntuple(idx -> copy(t[idx]), length(t))
 
 _default_verbosity = false
 function set_libsigflow_verbose(verbose::Bool)
@@ -17,14 +18,15 @@ Returns a `Channel` that allows multiple buffers to be
 """
 function generate_stream(gen_buff!::Function, buff_size::Integer, num_channels::Integer;
                          wrapper::Function = (f) -> f(),
-                         buffers_in_flight::Integer = 1)
-    c = Channel{Matrix{ComplexF32}}(buffers_in_flight)
+                         buffers_in_flight::Integer = 1,
+                         T::DataType = ComplexF32)
+    c = Channel{Matrix{T}}(buffers_in_flight)
 
     Base.errormonitor(Threads.@spawn begin
         buff_idx = 1
         try
             wrapper() do
-                buff = Matrix{ComplexF32}(undef, buff_size, num_channels)
+                buff = Matrix{T}(undef, buff_size, num_channels)
 
                 # Keep on generating buffers until `gen_buff!()` returns `false`.
                 while gen_buff!(buff)
@@ -50,14 +52,14 @@ Returns a `Channel` which will yield buffers of data to be processed of size `s_
 Starts an asynchronous task that does the reading from the stream, until the requested
 number of samples are read.
 """
-function stream_data(s_rx::SoapySDR.Stream, num_samples::Integer;
+function stream_data(s_rx::SoapySDR.Stream{T}, num_samples::Integer;
                      leadin_buffers::Integer = 16,
-                     kwargs...)
+                     kwargs...) where {T}
     # Wrapper to activate/deactivate `s_rx`
     wrapper = (f) -> begin
         SoapySDR.activate!(s_rx) do
             # Let the stream come online for a bit
-            buff = Matrix{ComplexF32}(undef, s_rx.mtu, s_rx.nchannels)
+            buff = Matrix{T}(undef, s_rx.mtu, s_rx.nchannels)
             for _ in 1:leadin_buffers
                 read!(s_rx, split_matrix(buff); timeout=1u"s")
             end
@@ -69,7 +71,8 @@ function stream_data(s_rx::SoapySDR.Stream, num_samples::Integer;
 
     # Read streams until we exhaust the number of buffs
     buff_idx = 0
-    return generate_stream(s_rx.mtu, s_rx.nchannels; wrapper, kwargs...) do buff
+    num_samples = UInt64(num_samples)
+    return generate_stream(s_rx.mtu, s_rx.nchannels; wrapper, T, kwargs...) do buff
         read!(s_rx, split_matrix(buff); timeout=1u"s")
         buff_idx += 1
         return buff_idx*s_rx.mtu < num_samples
@@ -83,12 +86,13 @@ Feed data from a `Channel` out onto the airwaves via a given `SoapySDR.Stream`.
 We suggest using `rechunk()` to convert to `s_tx.mtu`-sized buffers for maximum
 efficiency.
 """
-function stream_data(s_tx::SoapySDR.Stream, in::Channel{Matrix{ComplexF32}})
+function stream_data(s_tx::SoapySDR.Stream{T}, in::Channel{Matrix{T}}) where {T}
     Base.errormonitor(Threads.@spawn begin
         SoapySDR.activate!(s_tx) do
             # Consume channel and spit out into `s_tx`
-            consume_channel(in) do data
-                write(s_tx, split_matrix(data); timeout=0.1u"s")
+            consume_channel(in) do buff
+                out_buffs = ntuple_copy(split_matrix(buff))
+                write(s_tx, out_buffs; timeout=1u"s")
             end
 
             # We need to `sleep()` until we're done transmitting,
@@ -106,11 +110,11 @@ Generate a test pattern, used in our test suite.  Always generates buffers with
 length equal to `pattern_len`, if you need to change that, use `rechunk`.
 Transmits `num_buffers` and then quits.
 """
-function generate_test_pattern(pattern_len::Integer; num_channels::Int = 1, num_buffers::Integer = 1)
+function generate_test_pattern(pattern_len::Integer; num_channels::Int = 1, num_buffers::Integer = 1, T::DataType = ComplexF32)
     buffs_sent = 0
     return generate_stream(pattern_len, num_channels) do buff
         for idx in 1:pattern_len
-            buff[idx, :] .= ComplexF32(idx, idx)
+            buff[idx, :] .= T(idx, idx)
         end
         buffs_sent += 1
         return buffs_sent < num_buffers
@@ -366,7 +370,7 @@ function log_stream_xfer(in::Channel{Matrix{T}}; title = "Xfer", print_period = 
         buffers = 0
         consume_channel(in) do data
             buffers += 1
-            total_samples += prod(size(data))
+            total_samples += size(data,1)
 
             curr_time = time()
             if curr_time - last_print > print_period
