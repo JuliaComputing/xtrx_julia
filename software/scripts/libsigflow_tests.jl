@@ -223,3 +223,40 @@ end
     sign_extend!(sig)
     @test sig[1] == Complex{Int16}(0, -2048)
 end
+
+@testset "synchronize" begin
+    # First, a little `generate_test_pattern` example
+    num_samples = 32
+    c = rechunk(generate_test_pattern(num_samples; num_channels=2, num_buffers=2), div(num_samples,2))
+    header = ComplexF32(div(num_samples,2)+1, div(num_samples,2)+1)
+    c = synchronize(c, 1) do buff
+        return all(buff[1, :] .== header)
+    end
+
+    for idx in 1:3
+        buff = take!(c)
+        @test size(buff) == (div(num_samples,2),2)
+        if idx % 2 == 1
+            @test all(buff[1, :] .== header)
+        else
+            @test all(buff[1, :] .== ComplexF32(1,1))
+        end
+    end
+    sleep(0.001)
+    @test !isopen(c)
+
+
+    # Next, a "find anomaly" example:
+    c = generate_stream(1024, 1) do buff
+        buff[:,1] .= randn(ComplexF32, size(buff, 1))
+        buff[560:640, 1] .+= ComplexF32(10, 10)
+        return false
+    end
+    c = synchronize(c, 10) do buff
+        return sum(abs.(buff))/10 > 5.0
+    end
+    buff = take!(c)
+    @test length(buff) < (1024 - 560 + 10)
+    sleep(0.001)
+    @test !isopen(c)
+end

@@ -449,6 +449,12 @@ function tripwire(in::Channel{Matrix{T}}, ctl::Base.Event;
 end
 
 
+"""
+    sign_extend!(x::AbstractArray{Complex{Int16}})
+
+Given a `Complex{Int16}` stream that actually holds 12-bit signed values,
+perform sign-extension to convert to signed Int16 values.
+"""
 function sign_extend!(x::AbstractArray{Complex{Int16}})
     xi = reinterpret(Int16, x)
     for idx in 1:length(xi)
@@ -457,4 +463,66 @@ function sign_extend!(x::AbstractArray{Complex{Int16}})
         end
     end
     return x
+end
+
+
+"""
+    synchronize(search::Function, c::Channel, window_size::Int)
+
+Slides through the input from the given channel, searching for a window
+(of size `window_size`) for which `search(data[idx:idx+window_size]) == true`.
+Once it is found, outputs the rest of that buffer, and all of the buffers after that.
+"""
+function synchronize(search::Function, in::Channel{Matrix{T}}, window_size::Int) where {T}
+    out = Channel{Matrix{T}}()
+    Base.errormonitor(Threads.@spawn begin
+        circ_buff = Matrix{T}(undef, window_size, 0)
+        searching = true
+        samples_sent = 0
+
+        function check_circ_buff_size(buff)
+            if size(circ_buff, 2) != size(buff, 2)
+                circ_buff = zeros(T, window_size, size(buff,2))
+            end
+        end
+
+        function push_circ_buff(circ_buff, new_slice)
+            circ_buff[1:window_size-1, :] .= circ_buff[2:window_size, :]
+            circ_buff[window_size, :] .= new_slice
+        end
+
+        consume_channel(in) do buff
+            # Make loop type-stable
+            buff = view(buff, :, :)
+
+            # Feed buff sample by sample into our little circular window buffer:
+            if searching
+                check_circ_buff_size(buff)
+
+                while searching
+                    push_circ_buff(circ_buff, buff[1, :])
+                    # Advance our view of `buff`
+                    buff = view(buff, 2:size(buff,1), :)
+
+                    if search(circ_buff)
+                        # We found it!  Rejoice!
+                        searching = false
+                        continue
+                    end
+
+                    # We've run out of things to look through, fail out
+                    if size(buff,1) == 0
+                        return false
+                    end
+                end
+                # Spit out the buffers, of whatever size we end up getting
+                put!(out, vcat(circ_buff, buff))
+            else
+                put!(out, buff)
+            end
+        end
+        close(out)
+    end)
+
+    return out
 end
