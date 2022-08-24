@@ -131,6 +131,12 @@ function test_digital_loopback()
     # open the first device
     devs = Devices(parse(KWArgs, "driver=lime"))
     Device(devs[1]) do dev
+        # enable digital loopback
+        SoapySDR.SoapySDRDevice_writeSetting(dev, "LOOPBACK_ENABLE", "TRUE")
+
+        # Dump .ini
+        SoapySDR.SoapySDRDevice_writeSetting(dev, "DUMP_INI", "loopback_enabled.ini")
+
         # open RX and TX streams
         for c in vcat(dev.rx..., dev.tx...)
             c.sample_rate = 2u"MHz"
@@ -139,23 +145,28 @@ function test_digital_loopback()
         end
         for c in vcat(dev.rx...)
             # Set RXPGA to a high value so that we can read our filter tuning
-            c[SoapySDR.GainElement(:PGA)] = -6u"dB"
+            c[SoapySDR.GainElement(:PGA)] = 6u"dB"
         end
         stream_rx = SoapySDR.Stream(Complex{Int16}, dev.rx)
         stream_tx = SoapySDR.Stream(Complex{Int16}, dev.tx)
-
-        # enable digital loopback
-        SoapySDR.SoapySDRDevice_writeSetting(dev, "LOOPBACK_ENABLE", "TRUE")
 
         rx = stream_data(stream_rx, 2^32-1; leadin_buffers=0)
         rx_ready = Base.Event()
 
         # Stream test buffs out to the device
-        tx = make_test_buffs(; test_packet_len=stream_rx.mtu, num_channels=2)
+        tx = make_test_buffs(; num_channels=2)
         tx = tripwire(tx, rx_ready; name="tx", verbose=true)
         #tx = log_stream_xfer(tx; title="TX")
         #stream_data(stream_tx, rechunk(tx, stream_tx.mtu))
         stream_data(stream_tx, tx)
+
+        @async begin
+            wait(rx_ready)
+            SoapySDR.SoapySDRDevice_writeSetting(dev, "DUMP_INI", "flowing.ini")
+            #sleep(0.1)
+            #exit(0)
+        end
+
 
         # Verify what we receive
         #rx = log_stream_xfer(rx; title="RX")
