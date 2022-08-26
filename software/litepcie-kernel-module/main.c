@@ -540,7 +540,7 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 	struct litepcie_chan *chan;
 	uint32_t loop_status;
 	uint32_t clear_mask, irq_vector, irq_enable;
-	int i;
+	int i, j;
 
 /* Single MSI */
 #ifdef CSR_PCIE_MSI_CLEAR_ADDR
@@ -574,6 +574,9 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 			chan->dma.reader_hw_count |= (loop_status >> 16) * DMA_BUFFER_COUNT + (loop_status & 0xffff);
 			if (chan->dma.reader_hw_count_last > chan->dma.reader_hw_count)
 				chan->dma.reader_hw_count += (1 << (ilog2(DMA_BUFFER_COUNT) + 16));
+			/* wipe the transmitted buffer to avoid retransmission */
+			for (j = chan->dma.reader_hw_count_last; j < chan->dma.reader_hw_count; j++)
+				memset(chan->dma.reader_addr[j%DMA_BUFFER_COUNT], 0, DMA_BUFFER_SIZE);
 			chan->dma.reader_hw_count_last = chan->dma.reader_hw_count;
 #ifdef DEBUG_MSI
 			dev_dbg(&s->dev->dev, "MSI DMA%d Reader buf: %lld\n", i,
