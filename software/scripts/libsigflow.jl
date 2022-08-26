@@ -3,7 +3,7 @@
 using SoapySDR, Printf, DSP, FFTW, Statistics
 
 # Helper for turning a matrix into a tuple of views, for use with the SoapySDR API.
-split_matrix(m::Matrix{T}) where {T} = tuple(collect(view(m, :, idx) for idx in 1:size(m,2))...)
+split_matrix(m::AbstractArray{T}) where {T} = tuple(collect(view(m, :, idx) for idx in 1:size(m,2))...)
 ntuple_copy(t::NTuple{N}) where {N} = ntuple(idx -> copy(t[idx]), length(t))
 
 _default_verbosity = false
