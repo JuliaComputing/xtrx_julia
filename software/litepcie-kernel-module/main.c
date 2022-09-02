@@ -1131,7 +1131,7 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 		chan->dma.reader_sw_count = m.sw_count;
 
 		if (chan->dma.reader_inhibited &&
-		    chan->dma.reader_sw_count == chan->dma.reader_hw_count) {
+		    chan->dma.reader_sw_count >= chan->dma.reader_hw_count) {
 			dev_info(&chan->litepcie_dev->dev->dev, "Resuming TX");
 			chan->dma.reader_inhibited = 0;
 			litepcie_inhibit_tx(chan->litepcie_dev, 0);
