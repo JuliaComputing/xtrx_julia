@@ -76,6 +76,7 @@ struct litepcie_dma_chan {
 	uint8_t reader_enable;
 	uint8_t writer_lock;
 	uint8_t reader_lock;
+	uint8_t reader_inhibited;
 };
 
 struct litepcie_chan {
@@ -155,6 +156,16 @@ static void litepcie_disable_interrupt(struct litepcie_device *s, int irq_num)
 	v = litepcie_readl(s, CSR_PCIE_MSI_ENABLE_ADDR);
 	v &= ~(1 << irq_num);
 	litepcie_writel(s, CSR_PCIE_MSI_ENABLE_ADDR, v);
+}
+
+void litepcie_inhibit_tx(struct litepcie_device *s, int enable)
+{
+	uint32_t v;
+
+	v = litepcie_readl(s, CSR_LMS7002M_CONTROL_ADDR);
+	v &= ~(1 << CSR_LMS7002M_CONTROL_TX_INHIBIT_OFFSET);
+	v |= enable * (1 << CSR_LMS7002M_CONTROL_TX_INHIBIT_OFFSET);
+	litepcie_writel(s, CSR_LMS7002M_CONTROL_ADDR, v);
 }
 
 static int litepcie_dma_init_cpu(struct litepcie_device *s)
@@ -488,6 +499,10 @@ static int litepcie_dma_reader_start(struct litepcie_device *s, int chan_num)
 	dmachan->reader_hw_count_last = 0;
 	dmachan->reader_sw_count = 0;
 
+	/* disable inhibitor */
+	dmachan->reader_inhibited = 0;
+	litepcie_inhibit_tx(s, 0);
+
 	/* start dma reader */
 	litepcie_writel(s, dmachan->base + PCIE_DMA_READER_ENABLE_OFFSET, 1);
 
@@ -516,6 +531,10 @@ static int litepcie_dma_reader_stop(struct litepcie_device *s, int chan_num)
 	dmachan->reader_hw_count = 0;
 	dmachan->reader_hw_count_last = 0;
 	dmachan->reader_sw_count = 0;
+
+	/* disable inhibitor */
+	dmachan->reader_inhibited = 0;
+	litepcie_inhibit_tx(s, 0);
 
 	return 0;
 }
@@ -572,6 +591,14 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 			chan->dma.reader_hw_count |= (loop_status >> 16) * DMA_BUFFER_COUNT + (loop_status & 0xffff);
 			if (chan->dma.reader_hw_count_last > chan->dma.reader_hw_count)
 				chan->dma.reader_hw_count += (1 << (ilog2(DMA_BUFFER_COUNT) + 16));
+			if (!chan->dma.reader_inhibited &&
+			    (chan->dma.reader_sw_count - chan->dma.reader_hw_count) < 0) {
+				/* if userspace can't keep up, we'll end up sending stale data,
+				   so inhibit actual transmission until we catch up. */
+				dev_err(&s->dev->dev, "Inhibiting TX due to DMA underflow");
+				litepcie_inhibit_tx(s, 1);
+				chan->dma.reader_inhibited = 1;
+			}
 			chan->dma.reader_hw_count_last = chan->dma.reader_hw_count;
 #ifdef DEBUG_MSI
 			dev_dbg(&s->dev->dev, "MSI DMA%d Reader buf: %lld\n", i,
@@ -1102,6 +1129,13 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 		}
 
 		chan->dma.reader_sw_count = m.sw_count;
+
+		if (chan->dma.reader_inhibited &&
+		    chan->dma.reader_sw_count == chan->dma.reader_hw_count) {
+			dev_info(&chan->litepcie_dev->dev->dev, "Resuming TX");
+			chan->dma.reader_inhibited = 0;
+			litepcie_inhibit_tx(chan->litepcie_dev, 0);
+		}
 	}
 	break;
 	case LITEPCIE_IOCTL_LOCK:
