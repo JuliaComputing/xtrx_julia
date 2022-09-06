@@ -138,13 +138,13 @@ function soapy_write!(s::SoapySDR.Stream{T}, buff::Matrix{T}; timeout = 0.1u"s",
             try
                 if err == SoapySDR.SOAPY_SDR_TIMEOUT
                     if verbose
-                        @warn("TX TIMEOUT")
+                        println("TX TIMEOUT")
                     end
                     # Not sure what else to do here.
                     return
                 elseif err == SoapySDR.SOAPY_SDR_UNDERFLOW
                     if verbose
-                        @warn("TX UNDERFLOW")
+                        println("TX UNDERFLOW")
                     end
                     _num_underflows[] += 1
                     # This isn't really an error, just continue on until we
