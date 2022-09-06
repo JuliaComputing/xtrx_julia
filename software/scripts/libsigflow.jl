@@ -234,7 +234,7 @@ function stream_data(s_tx::SoapySDR.Stream{T}, in::Channel{Matrix{T}}) where {T}
         SoapySDR.activate!(s_tx) do
             # Consume channel and spit out into `s_tx`
             consume_channel(in) do data
-                soapy_write!(s_tx, data; timeout=0.1u"s")
+                soapy_write!(s_tx, data)
             end
 
             # We need to `sleep()` until we're done transmitting,
