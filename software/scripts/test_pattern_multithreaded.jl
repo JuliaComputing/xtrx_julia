@@ -20,7 +20,7 @@ GC.enable(false)
 function dma_test(dev_args)
     Device(dev_args) do dev
         # Try increasing `sample_rate`
-        sample_rate = 1u"MHz"
+        sample_rate = 500u"kHz"
         set_cgen_freq(dev, 16*sample_rate)
         for cr in dev.rx
             cr.sample_rate = sample_rate
@@ -49,12 +49,14 @@ function dma_test(dev_args)
         initialized_count = false
         counter = Int32(0)
         errors = Int64(0)
+        good_streak = 0
+        last_error_buffer_count = 0
 
         c = stream_data(stream, mtu*wr_nbufs*2000; auto_sign_extend=false, leadin_buffers=0)
         c = membuffer(c)
 
         # Log out information about data rate and such
-        c = log_stream_xfer(c; extra_values=() -> (;errors, total_bytes, counter=UInt32(counter)))
+        #c = log_stream_xfer(c; extra_values=() -> (;errors, total_bytes, counter=UInt32(counter)))
 
         consume_channel(c) do buff
             # libsigflow permutes our data into a standardized ordering
@@ -68,14 +70,16 @@ function dma_test(dev_args)
                 initialized_count = true
             end
 
+            last_errors = errors
             for j in eachindex(pbuff)
                 comp = Complex{Int16}(counter & 0xfff, (counter >> 12) & 0xfff)
                 if pbuff[j] != comp
                     # We may fail a few times while compiling at first, because we'll drop buffers.
                     # but eventually, we should be able to keep up with the data stream, as long as
                     # it's low enough.
-                    @warn("Error", j, pbuff[j], comp, buffs_processed, _num_overflows[])
+                    @warn("Error", j, pbuff[j], comp, buffs_processed, _num_overflows[], streak=buffs_processed - last_error_buffer_count)
                     errors += 1
+                    last_error_buffer_count = buffs_processed
                     initialized_count = false
                     break
                 end

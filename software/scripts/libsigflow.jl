@@ -72,7 +72,11 @@ end
 
 # Because the XTRX does not support the Soapy Streaming API yet,
 # we polyfill it here:
+last_handle = Ptr{Cvoid}(C_NULL)
+last_buff_ptr = Ptr{Cvoid}(C_NULL)
 function soapy_read!(s::SoapySDR.Stream{T}, buff::Matrix{T}; timeout = 0.1u"s", verbose::Bool = _default_verbosity, auto_sign_extend::Bool = true) where {T}
+    global last_handle, last_buff_ptr
+
     if s.d.driver == Symbol("XTRX over LitePCIe")
         buffs = Ptr{T}[C_NULL]
         GC.@preserve buffs begin
@@ -86,9 +90,7 @@ function soapy_read!(s::SoapySDR.Stream{T}, buff::Matrix{T}; timeout = 0.1u"s", 
                     end
                     return false
                 elseif err == SoapySDR.SOAPY_SDR_OVERFLOW
-                    if verbose
-                        println("RX OVERFLOW")
-                    end
+                    @info("RX OVERFLOW", last_handle, last_buff_ptr)
                     _num_overflows[] += 1
                     return false
                 elseif err <= 0
@@ -112,6 +114,9 @@ function soapy_read!(s::SoapySDR.Stream{T}, buff::Matrix{T}; timeout = 0.1u"s", 
                 if auto_sign_extend && T == Complex{Int16}
                     sign_extend!(buff)
                 end
+                @show buffs[1]
+                last_handle = handle
+                last_buff_ptr = buffs[1]
             finally
                 # Failures like overflows give an invalid handle
                 if handle != UInt64(0) - 1

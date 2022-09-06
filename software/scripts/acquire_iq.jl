@@ -13,6 +13,9 @@ if Threads.nthreads() < 2
     error("This script must be run with multiple threads!")
 end
 
+# Disable GC so we drop fewer buffers
+GC.enable(false)
+
 # foreign threads can segfault us when they call back into the logger
 #SoapySDR.register_log_handler()
 
@@ -69,13 +72,14 @@ function do_txrx(mode::Symbol;
         fullscale = dev.tx[1].fullscale
 
         frequency = 1575.00u"MHz"
-        sample_rate = 6u"MHz"
+        sample_rate = 1u"MHz"
+        set_cgen_freq(dev, 16*sample_rate)
 
         # Setup transmission/recieve parameters
         for (c_idx, cr) in enumerate(dev.rx)
-            cr.bandwidth = sample_rate
             cr.frequency = frequency
             cr.sample_rate = sample_rate
+            cr.bandwidth = max(sample_rate, 1.5u"MHz")
 
             if mode == :tbb_loopback
                 # For TBB loopback, we really don't need to be that loud
@@ -113,9 +117,9 @@ function do_txrx(mode::Symbol;
         end
 
         for ct in dev.tx
-            ct.bandwidth = sample_rate
             ct.frequency = frequency
             ct.sample_rate = sample_rate
+            ct.bandwidth = max(sample_rate, 5u"MHz")
 
             if mode ==:tx
                 # If we're actually TX'ing and RX'ing, juice it up
@@ -178,7 +182,7 @@ function do_txrx(mode::Symbol;
             # as it takes a long time to plot randomness
             num_buffers = 4
         else
-            num_buffers = 256
+            num_buffers = 256*20
         end
 
         # prepare some data to send:
@@ -211,7 +215,7 @@ function do_txrx(mode::Symbol;
             num_buffs_transmitted += 1
             return true
         end
-        c_tx = rechunk(c_tx, stream_tx.mtu)
+        c_tx = membuffer(rechunk(c_tx, stream_tx.mtu))
         t_tx = stream_data(stream_tx, tripwire(c_tx, tx_go))
 
         # RX reads the buffers in, and pushes them onto `iq_data`
@@ -276,22 +280,22 @@ function main(args::String...)
     full_suite = "--full" in args
     skip_sanity_check = "--no-sanity-check" in args
 
-    # You can set this here, but Elliot has changed XTRXDevice.cpp to do this automatically.
+    # Set registers here via `addr => value``
+    # To just print them out, use `addr => nothing`
     register_sets = Pair[
-        #0x00ad => 0x03f3,
-
-        # Force CG_IAMP_TBB to be smaller, to prevent over saturating
-        # Note that `0x45xx` is still large enough to saturate, but setting the IAMP
-        # lower causes a bunch of noise to leak in for reasons I still don't fully understand.
-        # This is probably related to the fact that most transmitters prefer to saturate.
-        #0x0108 => 0x558c,
     ]
 
     if full_suite
         full_loopback_suite(; dump_inis, register_sets, skip_sanity_check)
     else
+        # Run it once, to compile
+        do_txrx(mode; dump_inis, register_sets, skip_sanity_check)
+
+        # Manually GC
+        GC.gc(true)
+
         iq_data, data_tx = do_txrx(mode; dump_inis, register_sets, skip_sanity_check)
-        make_txrx_plots(iq_data, data_tx; name="$(mode)")
+        make_txrx_plots(iq_data[end-100000:end, :], data_tx[end-100000:end, :]; name="$(mode)")
     end
 end
 
