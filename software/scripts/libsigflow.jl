@@ -72,47 +72,52 @@ end
 
 # Because the XTRX does not support the Soapy Streaming API yet,
 # we polyfill it here:
-function soapy_read!(s::SoapySDR.Stream{T}, buff::Matrix{T}; timeout = 1u"s", verbose::Bool = _default_verbosity, auto_sign_extend::Bool = true) where {T}
+function soapy_read!(s::SoapySDR.Stream{T}, buff::Matrix{T}; timeout = 0.1u"s", verbose::Bool = _default_verbosity, auto_sign_extend::Bool = true) where {T}
     if s.d.driver == Symbol("XTRX over LitePCIe")
         buffs = Ptr{T}[C_NULL]
         GC.@preserve buffs begin
             t_us = round(Int, uconvert(u"μs", timeout).val)
             err, handle, flags, timeNs = SoapySDR.SoapySDRDevice_acquireReadBuffer(s.d, s, buffs, t_us)
 
-            if err == SoapySDR.SOAPY_SDR_TIMEOUT
-                if verbose
-                    @warn("RX TIMEOUT", s.d, timeout)
+            try
+                if err == SoapySDR.SOAPY_SDR_TIMEOUT
+                    if verbose
+                        println("RX TIMEOUT")
+                    end
+                    return false
+                elseif err == SoapySDR.SOAPY_SDR_OVERFLOW
+                    if verbose
+                        println("RX OVERFLOW")
+                    end
+                    _num_overflows[] += 1
+                    return false
+                elseif err <= 0
+                    @error("SoapySDRDevice_acquireReadBuffer() failed", err)
+                    error("SoapySDRDevice_acquireReadBuffer() failed")
+                elseif err != s.mtu
+                    if verbose
+                        @warn("Got a non-MTU buffer size?!", err, Int(s.mtu))
+                    end
                 end
-                return false
-            elseif err == SoapySDR.SOAPY_SDR_OVERFLOW
-                if verbose
-                    @warn("RX OVERFLOW", s.d)
+
+                # Copy the SoapySDR-provided buffer out into our own
+                pbuff = unsafe_wrap(Matrix{T}, buffs[1], (s.nchannels, Int(s.mtu)))
+                copyto!(
+                    buff,
+                    permutedims(pbuff),
+                )
+
+                # Sign-extend `buff` if we're dealing with Complex{Int16}
+                # but which is actually Complex{Int12} inside.
+                if auto_sign_extend && T == Complex{Int16}
+                    sign_extend!(buff)
                 end
-                _num_overflows[] += 1
-                return false
-            elseif err <= 0
-                @error("SoapySDRDevice_acquireReadBuffer() failed", err)
-                error("SoapySDRDevice_acquireReadBuffer() failed")
-            elseif err != s.mtu
-                if verbose
-                    @warn("Got a non-MTU buffer size?!", err, Int(s.mtu))
+            finally
+                # Failures like overflows give an invalid handle
+                if handle != UInt64(0) - 1
+                    SoapySDR.SoapySDRDevice_releaseReadBuffer(s.d, s, handle)
                 end
             end
-
-            # Copy the SoapySDR-provided buffer out into our own
-            pbuff = unsafe_wrap(Matrix{T}, buffs[1], (s.nchannels, Int(s.mtu)))
-            copyto!(
-                buff,
-                permutedims(pbuff),
-            )
-
-            # Sign-extend `buff` if we're dealing with Complex{Int16}
-            # but which is actually Complex{Int12} inside.
-            if auto_sign_extend && T == Complex{Int16}
-                sign_extend!(buff)
-            end
-
-            SoapySDR.SoapySDRDevice_releaseReadBuffer(s.d, s, handle)
             return true
         end
     else
