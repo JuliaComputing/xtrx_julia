@@ -69,18 +69,26 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
 
         test_mode = lfsr_mode ? "LFSR" : "pattern"
 
+        error_count = 0
+        errored_buffer_count = 0
+
+        #GC.gc()
+
         @info "Receiving data using $dma_mode with $test_mode..."
         SoapySDR.activate!(stream) do
-            time = @elapsed for i in 1:50000
+            time = @elapsed for i in 1:5000
                 err, handle, flags, timeNs = SoapySDR.SoapySDRDevice_acquireReadBuffer(dev, stream, buffs)
                 if err == SoapySDR.SOAPY_SDR_OVERFLOW
                     overflow_events += 1
-                    initialized_count = false
                     continue
                 elseif err == SoapySDR.SOAPY_SDR_TIMEOUT
                     continue
                 end
 
+                #if i%32 == 0
+                    #println(unsafe_string(SoapySDR.SoapySDRDevice_readSetting(dev, "DMA_BUFFERS")))
+                #end
+                prev_error_count = error_count
                 if use_gpu
                     # GPU NOTE:
                     # this is very tight with our 8K buffers: a kernel launch +
@@ -103,12 +111,14 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
 
                     # check the data
                     # XXX: this loop does not stay within the 60us time budget
-                    for j in eachindex(comp)
+                    every_other = 8
+                    for j in 1:every_other:length(comp)
                         z = Complex{Int16}(counter & 0xfff, (counter >> 12) & 0xfff)
                         if comp[j] != z
-                            @warn("Error", received=comp[j], expected=z)
+                            #@warn("Error", received=comp[j], expected=z)
+                            error_count = error_count + 1
                         end
-                        counter = (counter + 1) & 0xffffff
+                        counter = (counter + every_other) & 0xffffff
                     end
 
                     #arr .= 1        # to verify we can actually do something with this
@@ -137,14 +147,30 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
 
                         # check the data
                         # XXX: this loop does not stay within the 60us time budget
-                        for j in eachindex(buf)
-                            z = Complex{Int16}(counter & 0xfff, (counter >> 12) & 0xfff)
-                            if buf[j] != z
-                                @warn("Error", received=buf[j], expected=z)
+                        trust_first = false
+                        if !trust_first
+                            every_other = 8
+                            for j in 1:every_other:length(buf)
+                                z = Complex{Int16}(counter & 0xfff, (counter >> 12) & 0xfff)
+                                if buf[j] != z
+                                    #@warn("Error", received=buf[j], expected=z)
+                                    error_count = error_count + 1
+                                end
+                                counter = (counter + every_other) & 0xffffff
                             end
-                            counter = (counter + 1) & 0xffffff
+                        else
+                            z = Complex{Int16}(counter & 0xfff, (counter >> 12) & 0xfff)
+                            if buf[1] != z
+                                #@warn("Error", received=buf[j], expected=z)
+                                error_count = error_count + 1
+                            end
+                            counter = (counter + length(buf)) & 0xffffff
                         end
                     end
+                end
+
+                if prev_error_count != error_count
+                    errored_buffer_count = errored_buffer_count + 1
                 end
 
                 SoapySDR.SoapySDRDevice_releaseReadBuffer(dev, stream, handle)
@@ -152,16 +178,22 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
             end
             @info "Data rate: $(Base.format_bytes(total_bytes / time))/s"
             @info "Overflow events: $overflow_events"
-
+            if error_count > 0
+                @warn "Errored buffer count: $errored_buffer_count"
+                @warn "Total error count: $error_count"
+            end
         end
     end
 end
 
 function main()
     for dev_args in Devices(driver="XTRX")
+        GC.enable(false)
         try
             dma_test(dev_args; use_gpu=false, lfsr_mode=true)
+            #GC.gc()
             dma_test(dev_args; use_gpu=false, lfsr_mode=false)
+            #GC.gc()
             dma_test(dev_args; use_gpu=true,  lfsr_mode=false)
         catch e
             @error "Test failed" path=dev_args["path"] serial=dev_args["serial"] exception=(e, catch_backtrace())
