@@ -90,7 +90,9 @@ function soapy_read!(s::SoapySDR.Stream{T}, buff::Matrix{T}; timeout = 0.1u"s", 
                     end
                     return false
                 elseif err == SoapySDR.SOAPY_SDR_OVERFLOW
-                    @info("RX OVERFLOW", last_handle, last_buff_ptr)
+                    if verbose
+                        @warn("RX OVERFLOW", last_handle, last_buff_ptr)
+                    end
                     _num_overflows[] += 1
                     return false
                 elseif err <= 0
@@ -114,7 +116,6 @@ function soapy_read!(s::SoapySDR.Stream{T}, buff::Matrix{T}; timeout = 0.1u"s", 
                 if auto_sign_extend && T == Complex{Int16}
                     sign_extend!(buff)
                 end
-                @show buffs[1]
                 last_handle = handle
                 last_buff_ptr = buffs[1]
             finally
@@ -591,9 +592,15 @@ function log_stream_xfer(in::Channel{Matrix{T}}; title = "Xfer", print_period = 
         last_print = start_time
         total_samples = 0
         buffers = 0
+        last_xflows = (_num_overflows[], _num_underflows[])
+        last_xflow_bufffer_count = 0
         consume_channel(in) do data
             buffers += 1
             total_samples += size(data,1)
+            xflows = (_num_overflows[], _num_underflows[])
+            if xflows != last_xflows
+                last_xflow_bufffer_count = buffers
+            end
 
             curr_time = time()
             if curr_time - last_print > print_period
@@ -603,12 +610,14 @@ function log_stream_xfer(in::Channel{Matrix{T}}; title = "Xfer", print_period = 
                     buffers,
                     buffer_size = size(data),
                     total_samples,
-                    over_and_underflows = (_num_overflows[], _num_underflows[]),
+                    xflows,
+                    xflow_streak = buffers - last_xflow_bufffer_count,
                     samples_per_sec = @sprintf("%.1f MHz", samples_per_sec/1e6),
                     data_rate = @sprintf("%.1f MB/s", samples_per_sec * sizeof(T)/1e6),
                     duration = @sprintf("%.1f s", duration),
                     extra_values()...,
                 )
+                last_xflows = (_num_overflows[], _num_underflows[])
                 last_print = curr_time
             end
             put!(out, data)
@@ -618,9 +627,12 @@ function log_stream_xfer(in::Channel{Matrix{T}}; title = "Xfer", print_period = 
         @info("$(title) - DONE",
             buffers,
             total_samples,
+            xflows = (_num_overflows[], _num_underflows[]),
+            xflow_streak = buffers - last_xflow_bufffer_count,
             samples_per_sec = @sprintf("%.1f MHz", samples_per_sec/1e6),
             data_rate = @sprintf("%.1f MB/s", samples_per_sec * sizeof(T)/1e6),
             duration = @sprintf("%.1f s", duration),
+            extra_values()...,
         )
     end
 end
@@ -661,6 +673,29 @@ function tripwire(in::Channel{Matrix{T}}, ctl::Base.Event;
                 already_printed = true
             end
             put!(out, buff)
+        end
+    end
+end
+
+function streaming_filter(in::Channel{Matrix{T}}, filter_coeffs::Vector{K}) where {T, K <: AbstractFloat}
+    spawn_channel_thread(;T=promote_type(T,K)) do out
+        # Create N different filter state objects,
+        # one for each channel we're filtering
+        filters = FIRFilter[]
+        function make_filters!(buff)
+            if length(filters) != size(buff,2)
+                filters = [FIRFilter(filter_coeffs) for _ in 1:size(buff,2)]
+            end
+        end
+        consume_channel(in) do buff
+            make_filters!(buff)
+            out_buff = Matrix{promote_type(T,K)}(undef, size(buff)...)
+            for ch_idx in 1:size(buff,2)
+                buff_slice = view(buff, :, ch_idx)
+                out_buff_slice = view(out_buff, :, ch_idx)
+                filt!(out_buff_slice, filters[ch_idx], buff_slice)
+            end
+            put!(out, out_buff)
         end
     end
 end
