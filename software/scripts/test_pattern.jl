@@ -5,6 +5,10 @@
 using SoapySDR
 using Test
 using CUDA
+using TimerOutputs
+
+const to = TimerOutput()
+
 device!(0)  # SoapySDR needs CUDA to be initialized
 
 #SoapySDR.register_log_handler()
@@ -77,7 +81,7 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
         @info "Receiving data using $dma_mode with $test_mode..."
         SoapySDR.activate!(stream) do
             time = @elapsed for i in 1:5000
-                err, handle, flags, timeNs = SoapySDR.SoapySDRDevice_acquireReadBuffer(dev, stream, buffs)
+                @timeit to "acquire" err, handle, flags, timeNs = SoapySDR.SoapySDRDevice_acquireReadBuffer(dev, stream, buffs)
                 if err == SoapySDR.SOAPY_SDR_OVERFLOW
                     overflow_events += 1
                     continue
@@ -89,7 +93,7 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
                     #println(unsafe_string(SoapySDR.SoapySDRDevice_readSetting(dev, "DMA_BUFFERS")))
                 #end
                 prev_error_count = error_count
-                if use_gpu
+                @timeit to "data validation" if use_gpu
                     # GPU NOTE:
                     # this is very tight with our 8K buffers: a kernel launch +
                     # 8K broadcast + sync takes ~10, while at a data rate of 1Gbps we
@@ -118,7 +122,7 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
                             #@warn("Error", received=comp[j], expected=z)
                             error_count = error_count + 1
                         end
-                        counter = (counter + every_other) & 0xffffff
+                        counter = counter + every_other
                     end
 
                     #arr .= 1        # to verify we can actually do something with this
@@ -156,7 +160,7 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
                                     #@warn("Error", received=buf[j], expected=z)
                                     error_count = error_count + 1
                                 end
-                                counter = (counter + every_other) & 0xffffff
+                                counter = counter + every_other
                             end
                         else
                             z = Complex{Int16}(counter & 0xfff, (counter >> 12) & 0xfff)
@@ -164,7 +168,7 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
                                 #@warn("Error", received=buf[j], expected=z)
                                 error_count = error_count + 1
                             end
-                            counter = (counter + length(buf)) & 0xffffff
+                            counter = counter + length(buf)
                         end
                     end
                 end
@@ -173,9 +177,12 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
                     errored_buffer_count = errored_buffer_count + 1
                 end
 
-                SoapySDR.SoapySDRDevice_releaseReadBuffer(dev, stream, handle)
+                @timeit to "release" SoapySDR.SoapySDRDevice_releaseReadBuffer(dev, stream, handle)
                 total_bytes += bytes
             end
+            show(to)
+            println()
+            reset_timer!(to)
             @info "Data rate: $(Base.format_bytes(total_bytes / time))/s"
             @info "Overflow events: $overflow_events"
             if error_count > 0
