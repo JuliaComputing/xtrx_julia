@@ -72,47 +72,58 @@ end
 
 # Because the XTRX does not support the Soapy Streaming API yet,
 # we polyfill it here:
-function soapy_read!(s::SoapySDR.Stream{T}, buff::Matrix{T}; timeout = 1u"s", verbose::Bool = _default_verbosity, auto_sign_extend::Bool = true) where {T}
+last_handle = Ptr{Cvoid}(C_NULL)
+last_buff_ptr = Ptr{Cvoid}(C_NULL)
+function soapy_read!(s::SoapySDR.Stream{T}, buff::Matrix{T}; timeout = 0.1u"s", verbose::Bool = _default_verbosity, auto_sign_extend::Bool = true) where {T}
+    global last_handle, last_buff_ptr
+
     if s.d.driver == Symbol("XTRX over LitePCIe")
         buffs = Ptr{T}[C_NULL]
         GC.@preserve buffs begin
             t_us = round(Int, uconvert(u"μs", timeout).val)
             err, handle, flags, timeNs = SoapySDR.SoapySDRDevice_acquireReadBuffer(s.d, s, buffs, t_us)
 
-            if err == SoapySDR.SOAPY_SDR_TIMEOUT
-                if verbose
-                    @warn("RX TIMEOUT", s.d, timeout)
+            try
+                if err == SoapySDR.SOAPY_SDR_TIMEOUT
+                    if verbose
+                        println("RX TIMEOUT")
+                    end
+                    return false
+                elseif err == SoapySDR.SOAPY_SDR_OVERFLOW
+                    if verbose
+                        @warn("RX OVERFLOW", last_handle, last_buff_ptr)
+                    end
+                    _num_overflows[] += 1
+                    return false
+                elseif err <= 0
+                    @error("SoapySDRDevice_acquireReadBuffer() failed", err)
+                    error("SoapySDRDevice_acquireReadBuffer() failed")
+                elseif err != s.mtu
+                    if verbose
+                        @warn("Got a non-MTU buffer size?!", err, Int(s.mtu))
+                    end
                 end
-                return false
-            elseif err == SoapySDR.SOAPY_SDR_OVERFLOW
-                if verbose
-                    @warn("RX OVERFLOW", s.d)
+
+                # Copy the SoapySDR-provided buffer out into our own
+                pbuff = unsafe_wrap(Matrix{T}, buffs[1], (s.nchannels, Int(s.mtu)))
+                copyto!(
+                    buff,
+                    permutedims(pbuff),
+                )
+
+                # Sign-extend `buff` if we're dealing with Complex{Int16}
+                # but which is actually Complex{Int12} inside.
+                if auto_sign_extend && T == Complex{Int16}
+                    sign_extend!(buff)
                 end
-                _num_overflows[] += 1
-                return false
-            elseif err <= 0
-                @error("SoapySDRDevice_acquireReadBuffer() failed", err)
-                error("SoapySDRDevice_acquireReadBuffer() failed")
-            elseif err != s.mtu
-                if verbose
-                    @warn("Got a non-MTU buffer size?!", err, Int(s.mtu))
+                last_handle = handle
+                last_buff_ptr = buffs[1]
+            finally
+                # Failures like overflows give an invalid handle
+                if handle != UInt64(0) - 1
+                    SoapySDR.SoapySDRDevice_releaseReadBuffer(s.d, s, handle)
                 end
             end
-
-            # Copy the SoapySDR-provided buffer out into our own
-            pbuff = unsafe_wrap(Matrix{T}, buffs[1], (s.nchannels, Int(s.mtu)))
-            copyto!(
-                buff,
-                permutedims(pbuff),
-            )
-
-            # Sign-extend `buff` if we're dealing with Complex{Int16}
-            # but which is actually Complex{Int12} inside.
-            if auto_sign_extend && T == Complex{Int16}
-                sign_extend!(buff)
-            end
-
-            SoapySDR.SoapySDRDevice_releaseReadBuffer(s.d, s, handle)
             return true
         end
     else
@@ -133,13 +144,13 @@ function soapy_write!(s::SoapySDR.Stream{T}, buff::Matrix{T}; timeout = 0.1u"s",
             try
                 if err == SoapySDR.SOAPY_SDR_TIMEOUT
                     if verbose
-                        @warn("TX TIMEOUT")
+                        println("TX TIMEOUT")
                     end
                     # Not sure what else to do here.
                     return
                 elseif err == SoapySDR.SOAPY_SDR_UNDERFLOW
                     if verbose
-                        @warn("TX UNDERFLOW")
+                        println("TX UNDERFLOW")
                     end
                     _num_underflows[] += 1
                     # This isn't really an error, just continue on until we
@@ -229,7 +240,7 @@ function stream_data(s_tx::SoapySDR.Stream{T}, in::Channel{Matrix{T}}) where {T}
         SoapySDR.activate!(s_tx) do
             # Consume channel and spit out into `s_tx`
             consume_channel(in) do data
-                soapy_write!(s_tx, data; timeout=0.1u"s")
+                soapy_write!(s_tx, data)
             end
 
             # We need to `sleep()` until we're done transmitting,
@@ -581,9 +592,15 @@ function log_stream_xfer(in::Channel{Matrix{T}}; title = "Xfer", print_period = 
         last_print = start_time
         total_samples = 0
         buffers = 0
+        last_xflows = (_num_overflows[], _num_underflows[])
+        last_xflow_bufffer_count = 0
         consume_channel(in) do data
             buffers += 1
             total_samples += size(data,1)
+            xflows = (_num_overflows[], _num_underflows[])
+            if xflows != last_xflows
+                last_xflow_bufffer_count = buffers
+            end
 
             curr_time = time()
             if curr_time - last_print > print_period
@@ -593,12 +610,14 @@ function log_stream_xfer(in::Channel{Matrix{T}}; title = "Xfer", print_period = 
                     buffers,
                     buffer_size = size(data),
                     total_samples,
-                    over_and_underflows = (_num_overflows[], _num_underflows[]),
+                    xflows,
+                    xflow_streak = buffers - last_xflow_bufffer_count,
                     samples_per_sec = @sprintf("%.1f MHz", samples_per_sec/1e6),
                     data_rate = @sprintf("%.1f MB/s", samples_per_sec * sizeof(T)/1e6),
                     duration = @sprintf("%.1f s", duration),
                     extra_values()...,
                 )
+                last_xflows = (_num_overflows[], _num_underflows[])
                 last_print = curr_time
             end
             put!(out, data)
@@ -608,9 +627,12 @@ function log_stream_xfer(in::Channel{Matrix{T}}; title = "Xfer", print_period = 
         @info("$(title) - DONE",
             buffers,
             total_samples,
+            xflows = (_num_overflows[], _num_underflows[]),
+            xflow_streak = buffers - last_xflow_bufffer_count,
             samples_per_sec = @sprintf("%.1f MHz", samples_per_sec/1e6),
             data_rate = @sprintf("%.1f MB/s", samples_per_sec * sizeof(T)/1e6),
             duration = @sprintf("%.1f s", duration),
+            extra_values()...,
         )
     end
 end
@@ -651,6 +673,29 @@ function tripwire(in::Channel{Matrix{T}}, ctl::Base.Event;
                 already_printed = true
             end
             put!(out, buff)
+        end
+    end
+end
+
+function streaming_filter(in::Channel{Matrix{T}}, filter_coeffs::Vector{K}) where {T, K <: AbstractFloat}
+    spawn_channel_thread(;T=promote_type(T,K)) do out
+        # Create N different filter state objects,
+        # one for each channel we're filtering
+        filters = FIRFilter[]
+        function make_filters!(buff)
+            if length(filters) != size(buff,2)
+                filters = [FIRFilter(filter_coeffs) for _ in 1:size(buff,2)]
+            end
+        end
+        consume_channel(in) do buff
+            make_filters!(buff)
+            out_buff = Matrix{promote_type(T,K)}(undef, size(buff)...)
+            for ch_idx in 1:size(buff,2)
+                buff_slice = view(buff, :, ch_idx)
+                out_buff_slice = view(out_buff, :, ch_idx)
+                filt!(out_buff_slice, filters[ch_idx], buff_slice)
+            end
+            put!(out, out_buff)
         end
     end
 end
