@@ -40,6 +40,7 @@ from gateware.gps import GPS
 from gateware.vctcxo import VCTCXO
 from gateware.rf_switches import RFSwitches
 from gateware.lms7002m import LMS7002M
+from gateware.pmic import PMIC
 
 from software import generate_litepcie_software
 
@@ -194,6 +195,9 @@ class BaseSoC(SoCCore):
 
         # RF Switches ------------------------------------------------------------------------------
         self.submodules.rf_switches = RFSwitches(platform.request("rf_switches"))
+
+        # PMIC Config Registers ---------------------------------------------------------------------
+        self.submodules.pmic = PMIC()
 
         # LMS7002M ---------------------------------------------------------------------------------
         self.submodules.lms7002m = LMS7002M(platform, platform.request("lms7002m"), sys_clk_freq,

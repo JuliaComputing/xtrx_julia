@@ -278,6 +278,8 @@ static void vctcxo_dac_set(int value) {
 		ret = i2c1_write(DAC60501_I2C_ADDR, cmd, dat, 2);
 		if (!ret) {
 			printf("DAC write failed\n");
+		} else {
+			vctcxo_control_dac_value_write(value);
 		}
 	}
 }

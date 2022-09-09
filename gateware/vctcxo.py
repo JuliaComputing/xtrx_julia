@@ -22,6 +22,11 @@ class VCTCXO(Module, AutoCSR):
                 ("``0b0``", "Disable VCTCXO"),
                 ("``0b1``", "Enable VCTCXO")
             ], reset=1),
+            CSRField("dac_set", size=1, offset=2, pulse=True, values=[
+                ("``0b0``", "Disable VCTCXO"),
+                ("``0b1``", "Enable VCTCXO")
+            ], reset=1),
+            CSRField("dac_value", size=12, offset=3, reset=1),
         ])
         self.cycles_latch = CSR()
         self.cycles       = CSRStatus(32, reset=0)
