@@ -112,8 +112,8 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
 
                     # check the data
                     # XXX: this loop does not stay within the 60us time budget
-                    every_other = 8
-                    for j in 1:every_other:length(comp)
+                    step = 8
+                    for j in 1:step(comp)
                         z = Complex{Int16}(counter & 0xfff, (counter >> 12) & 0xfff)
                         if comp[j] != z
                             #@warn("Error", received=comp[j], expected=z)
