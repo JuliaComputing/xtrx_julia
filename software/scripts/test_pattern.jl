@@ -75,9 +75,6 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
 
         error_count = 0
         errored_buffer_count = 0
-
-        #GC.gc()
-
         @info "Receiving data using $dma_mode with $test_mode..."
         SoapySDR.activate!(stream) do
             time = @elapsed for i in 1:5000
