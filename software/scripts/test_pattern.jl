@@ -116,7 +116,6 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
                     for j in 1:step(comp)
                         z = Complex{Int16}(counter & 0xfff, (counter >> 12) & 0xfff)
                         if comp[j] != z
-                            #@warn("Error", received=comp[j], expected=z)
                             error_count = error_count + 1
                         end
                         counter = counter + every_other
