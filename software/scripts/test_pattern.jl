@@ -118,7 +118,7 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
                         if comp[j] != z
                             error_count = error_count + 1
                         end
-                        counter = counter + every_other
+                        counter = counter + step
                     end
 
                     #arr .= 1        # to verify we can actually do something with this
