@@ -198,7 +198,6 @@ function main()
         GC.enable(false)
         try
             dma_test(dev_args; use_gpu=false, lfsr_mode=true)
-            #GC.gc()
             dma_test(dev_args; use_gpu=false, lfsr_mode=false)
             #GC.gc()
             dma_test(dev_args; use_gpu=true,  lfsr_mode=false)
