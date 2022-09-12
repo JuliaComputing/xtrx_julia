@@ -196,7 +196,6 @@ function main()
         try
             dma_test(dev_args; use_gpu=false, lfsr_mode=true)
             dma_test(dev_args; use_gpu=false, lfsr_mode=false)
-            #GC.gc()
             dma_test(dev_args; use_gpu=true,  lfsr_mode=false)
         catch e
             @error "Test failed" path=dev_args["path"] serial=dev_args["serial"] exception=(e, catch_backtrace())
