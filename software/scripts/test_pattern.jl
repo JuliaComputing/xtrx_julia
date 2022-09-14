@@ -13,7 +13,7 @@ device!(0)  # SoapySDR needs CUDA to be initialized
 
 #SoapySDR.register_log_handler()
 
-function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
+function dma_test(dev_args;use_gpu=false, lfsr_mode=false, show_mismatch=false)
     # GPU: set the DMA target
     dma_mode = use_gpu ? "GPU" : "CPU"
     dev_args["device"] = dma_mode
@@ -86,9 +86,11 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
                     continue
                 end
 
+                # uncomment to dump the DMA buffer states
                 #if i%32 == 0
                     #println(unsafe_string(SoapySDR.SoapySDRDevice_readSetting(dev, "DMA_BUFFERS")))
                 #end
+
                 prev_error_count = error_count
                 @timeit to "data validation" if use_gpu
                     # GPU NOTE:
@@ -113,7 +115,7 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
                     # check the data
                     # XXX: this loop does not stay within the 60us time budget
                     step = 8
-                    for j in 1:step(comp)
+                    for j in 1:step:length(comp)
                         z = Complex{Int16}(counter & 0xfff, (counter >> 12) & 0xfff)
                         if comp[j] != z
                             error_count = error_count + 1
@@ -133,7 +135,8 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
                         for j in 1:2:length(buf)-1
                             z = (~buf[j+1]) & 0x0fff
                             if buf[j] != z
-                                @warn("Error", received=buf[j], expected=z)
+                                show_mismatch && @warn("Error", received=buf[j], expected=z)
+                                error_count = error_count + 1
                             end
                         end
                     else
@@ -147,13 +150,15 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
 
                         # check the data
                         # XXX: this loop does not stay within the 60us time budget
+                        # So we can just check the first element and assume the rest are correct
+                        # by setting the flag below
                         trust_first = false
                         if !trust_first
                             every_other = 8
                             for j in 1:every_other:length(buf)
                                 z = Complex{Int16}(counter & 0xfff, (counter >> 12) & 0xfff)
                                 if buf[j] != z
-                                    #@warn("Error", received=buf[j], expected=z)
+                                    show_mismatch && @warn("Error", received=buf[j], expected=z)
                                     error_count = error_count + 1
                                 end
                                 counter = counter + every_other
@@ -161,7 +166,7 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false)
                         else
                             z = Complex{Int16}(counter & 0xfff, (counter >> 12) & 0xfff)
                             if buf[1] != z
-                                #@warn("Error", received=buf[j], expected=z)
+                                show_mismatch && @warn("Error", received=buf[j], expected=z)
                                 error_count = error_count + 1
                             end
                             counter = counter + length(buf)
