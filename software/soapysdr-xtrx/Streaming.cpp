@@ -421,41 +421,7 @@ int SoapyXTRX::readStream(
         return SOAPY_SDR_NOT_SUPPORTED;
 
     int num_chan_active = _rx_stream.channels.size();
-    // how many samples we need to get from the DMA buffer
-    // this is differnet form NumElems since NumElems is specified per channel
-    size_t samples = std::min(numElems*2, getStreamMTU(stream)*2);
-
-    // in the case of a split transaction, keep track of the amount of samples
-    // we processed already
-    size_t submitted_samples = 0;
-
-    if (_rx_stream.remainderHandle >= 0) {
-        // there is still some place left in the unsubmitted buffer, so fill
-        // it with as many new samples as possible
-        const size_t n = std::min(_rx_stream.remainderSamps, samples);
-
-        if (n < samples) {
-            // couldn't fit them all, so split the transaction
-            submitted_samples = n;
-        }
-
-        // unpack data
-        deinterleave(_rx_stream.remainderBuff, _rx_stream.remainderOffset,
-                        buffs, 0, n, _rx_stream.format, _rx_stream.channels.size());
-        _rx_stream.remainderSamps -= n;
-        _rx_stream.remainderOffset += n;
-
-        if (_rx_stream.remainderSamps == 0)
-        {
-            releaseReadBuffer(stream, _rx_stream.remainderHandle);
-            _rx_stream.remainderHandle = -1;
-            _rx_stream.remainderOffset = 0;
-        }
-
-        // finish processing if all samples were processed
-        if (n == samples)
-            return samples/2;
-    }
+    size_t mtu = getStreamMTU(stream);
 
     // get a new buffer
     size_t handle;
@@ -464,25 +430,15 @@ int SoapyXTRX::readStream(
         return ret;
     }
 
-    _rx_stream.remainderHandle = handle;
-    _rx_stream.remainderSamps = ret*2;
-
-    const size_t n = std::min((samples - submitted_samples), _rx_stream.remainderSamps);
-
     // unpack data
+    // TODO remainderBuff is uninitialized here, so we need to malloc in setupstream
     deinterleave(_rx_stream.remainderBuff, 0,
-                    buffs, submitted_samples/2,
-                    n, _rx_stream.format, _rx_stream.channels.size());
-    _rx_stream.remainderSamps -= n;
-    _rx_stream.remainderOffset += n;
+                    buffs, 0,
+                    mtu*2, _rx_stream.format, _rx_stream.channels.size());
 
-    if (_rx_stream.remainderSamps == 0) {
-        releaseReadBuffer(stream, _rx_stream.remainderHandle);
-        _rx_stream.remainderHandle = -1;
-        _rx_stream.remainderOffset = 0;
-    }
+    releaseReadBuffer(stream, handle);
 
-    return samples/2;
+    return mtu;
 }
 
 int SoapyXTRX::writeStream(
