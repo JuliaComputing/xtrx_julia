@@ -1,25 +1,27 @@
-# The purpose of this test is to verify that SoapySDR does not drop any samples when
-# running on a B200.
-# 
-# The B200's Rx port is connected to its Tx port (ideally using a cable to avoid
-# the usual channel weirdness). I have included 60 dB of attenuation in the loop in order
-# to avoid frying the receiver.
+# The purpose of this test is to verify that SoapySDR does not drop any samples during
+# transmission or reception.
+#
+# The hardware should be set up with a radio's Tx port connected to its Rx port. A cable
+# loopback connection with suitable attenuation is recommended. The USRPs radios work
+# well with 60 dB attenuation and the default values used in the code below.
 #
 # The test consists of transmitting a known LFSR sequence, and correlating it with the
-# received sequence. We expect the correlation peaks to occur with perfect periodicity. Any
+# received sequence. The correlation peaks should occur with perfect periodicity. Any
 # jumps in the location of the correlation peak would indicate that samples might have
 # been dropped.
 #
-# This test relies on the B200's Tx and Rx portions sharing a single clock, which implies
+# This test relies on the radio's Tx and Rx portions sharing a single clock, which implies
 # they are perfectly carrer- and symbol- synchronized.
 
 if Threads.nthreads() < 2
     error("Must run with greater than 1 thread for full duplex transmission!")
 end
 
-using SoapySDR, SoapyUHD_jll
+using SoapySDR
+# using SoapyUHD_jll  # include appropriate driver here
 using Unitful
 using DSP
+using Plots
 
 """
     lfsr(taps, degree)
