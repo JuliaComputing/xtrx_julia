@@ -94,8 +94,6 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false, show_mismatch=false)
         # get the RX channel
         chan = dev.rx[1]
 
-        lfsr_mode && use_gpu && error("LFSR test mode cannot be verified with GPU")
-
         #SoapySDR.SoapySDRDevice_writeSetting(dev, "RESET_RX_FIFO", "")
 
         if lfsr_mode
@@ -203,6 +201,7 @@ function main()
         try
             dma_test(dev_args; use_gpu=false, lfsr_mode=true)
             dma_test(dev_args; use_gpu=false, lfsr_mode=false)
+            dma_test(dev_args; use_gpu=true,  lfsr_mode=true)
             dma_test(dev_args; use_gpu=true,  lfsr_mode=false)
         catch e
             @error "Test failed" path=dev_args["path"] serial=dev_args["serial"] exception=(e, catch_backtrace())
