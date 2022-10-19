@@ -169,12 +169,39 @@ steps:
       # Make sure that future steps can load `libcuda.so`.  Our build process symlinks `libcuda.so.1` here.
       export "LD_LIBRARY_PATH=$${LD_LIBRARY_PATH}:$$(pwd)/build/lib"
 
+      echo "--- litepcie_util CSR dump"
+      ./test/reset.sh
+      mkdir -p litepcie_util_tests
+      ./build/bin/litepcie_util csr_dump > litepcie_util_tests/reset.csr.ini
+
       echo "--- litepcie_util scratch_test"
       ./build/bin/litepcie_util scratch_test
 
       echo "--- litepcie_util dma_test for 10s"
-      # Fail the build if we do not transfer at least 100k buffers
-      ./build/bin/litepcie_util dma_test -t 10000 -b 100000
+      # Fail the build if we do not transfer at least 100k buffers, or if we get >1000 errors.
+      ./build/bin/litepcie_util dma_test -a -w 12 -t 10000 -b 100000 -x 1000
+      ./build/bin/litepcie_util csr_dump > litepcie_util_tests/internal-0.csr.ini
+      ./build/bin/litepcie_util dma_test -a -w 12 -t 10000 -b 100000 -x 1000
+      ./build/bin/litepcie_util csr_dump > litepcie_util_tests/internal-1.csr.ini
+
+      # Try again, but this time after a reset
+      ./test/reset.sh
+      ./build/bin/litepcie_util dma_test -a -w 12 -t 10000 -b 100000 -x 1000
+      ./build/bin/litepcie_util csr_dump > litepcie_util_tests/internal-2.csr.ini
+
+      echo "--- litepcie_util external dma_test for 10s"
+      ./build/bin/litepcie_util lms_set_tx_rx_loopback 1
+      ./build/bin/litepcie_util dma_test -e -w 12 -t 10000
+      ./build/bin/litepcie_util csr_dump > litepcie_util_tests/external-0.csr.ini
+
+      # Try again, but this time after a reset
+      ./test/reset.sh
+      ./build/bin/litepcie_util lms_set_tx_rx_loopback 1
+      ./build/bin/litepcie_util dma_test -e -w 12 -t 10000
+      ./build/bin/litepcie_util csr_dump > litepcie_util_tests/external-1.csr.ini
+
+      # Upload everything in the tests directory
+      buildkite-agent artifact upload 'litepcie_util_tests/*'
 
       echo "--- Download SoapySDR/soapysdr-xtrx"
       buildkite-agent artifact download --step userspace-utilities soapysdr.tar.gz .
@@ -198,11 +225,16 @@ steps:
       echo "SoapySDRUtil --find"
       SOAPY_SDR_LOG_LEVEL=debug ./build/bin/SoapySDRUtil --find
 
+      echo "--- Run calibrate_delays.jl"
+      julia --project software/scripts/calibrate_delays.jl
+
       echo "--- Run acquire_iq.jl --full"
-      julia -t3 --project software/scripts/acquire_iq.jl --full
-      for f in *.png; do
-        buildkite-agent artifact upload $${f}
-      done
+      ./test/reset.sh
+      julia -t3 --project software/scripts/acquire_iq.jl --full --dump-inis
+
+      mkdir -p acquire_iq
+      mv *.ini *.png acquire_iq/
+      buildkite-agent artifact upload 'acquire_iq/*'
     agents:
       os: "linux"
       queue: "triad"

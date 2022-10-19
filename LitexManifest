@@ -8,7 +8,8 @@ litescope,52e9778f7455ae15164f062fa1a05cb831245570
 litesdcard,f7058d59703591d95c625fdd3ee6a2ea39ad2cf0
 litespi,ad89f9120783cf9f202fd138a5ad56c1fd3f47b0
 litex-boards,fb6efe1fa266c613409587e15475cb85203f188d
-litex,af582372030db380e570e17c20a53e4d0356b3b5
+# X-ref: https://github.com/enjoy-digital/litex/pull/1473
+litex,ed1d1b13bb097dcf08faa350854cb1472b78dfc6
 migen,639e66f4f453438e83d86dc13491b9403bbd8ec6
 pythondata-cpu-blackparrot,ba50883f12d33e1d834640640c84ddc9329bb68a
 pythondata-cpu-cv32e40p,5cb0e3dcbb6bb2e80cfaceeeab553b21b1be3921

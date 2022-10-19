@@ -14,6 +14,10 @@ fi
 curl -fLso "${LITEX_CHECKOUT_PATH}/litex_setup.py" https://raw.githubusercontent.com/enjoy-digital/litex/master/litex_setup.py
 (cd "${LITEX_CHECKOUT_PATH}"; python3 litex_setup.py --update)
 
+# X-ref: https://github.com/enjoy-digital/litex/pull/1473
+git -C "${LITEX_CHECKOUT_PATH}/litex" remote add staticfloat https://github.com/staticfloat/litex
+git -C "${LITEX_CHECKOUT_PATH}/litex" fetch staticfloat
+
 # For each line in the manifest, reset the concordant git repo to that sha
 while IFS="," read -r repo sha; do
     git -C "${LITEX_CHECKOUT_PATH}/${repo}" reset --hard "${sha}" || true
