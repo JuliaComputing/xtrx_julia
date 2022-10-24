@@ -6,8 +6,8 @@ using SoapySDR
 using Test
 using CUDA
 using TimerOutputs
-
-const to = TimerOutput()
+using Unitful
+using Base.Threads
 
 # Bring this in just for un_sign_extend!()
 using LibSigflow: un_sign_extend!
@@ -16,7 +16,7 @@ device!(0)  # SoapySDR needs CUDA to be initialized
 
 #SoapySDR.register_log_handler()
 
-function verify_lfsr_buffer(buff::AbstractArray{Complex{Int16}}, buff_idx::Int; show_mismatch::Bool = false)
+function verify_lfsr_buffer(buff::AbstractArray{Complex{Int16}}, buff_idx::Int; show_mismatch::Bool=false)
     error_count = 0
     for j in eachindex(buff)
         # Ensure that the LFSR output has real/imaginary parts that are bit-flips of eachother
@@ -38,20 +38,21 @@ function counter_to_iq(counter::Integer)
 end
 function iq_to_counter(iq::Complex{<:Integer})
     return Int32(real(iq)) & 0xfff |
-         ((Int32(imag(iq)) & 0xfff) << 12)
+           ((Int32(imag(iq)) & 0xfff) << 12)
 end
 
 # State to track the FPGA pattern counter from buffer to buffer
-const _counter = Ref{Int32}(0)
-function verify_fpga_pattern_buffer(buff::AbstractArray{Complex{Int16}}, buff_idx::Int; show_mismatch::Bool = false, show_sync::Bool = true, step::Int = 1)
+
+function verify_fpga_pattern_buffer(buff::AbstractArray{Complex{Int16}}, buff_idx::Int; show_mismatch::Bool=false, show_sync::Bool=false, step::Int=1,
+    _counter=Ref{Int32}(0))
     counter = _counter[]
     error_count = 0
 
     # If we're not synchronized, then sync up and notify the user:
     if counter_to_iq(counter) != buff[1]
-        if show_sync
-            @info("FPGA pattern synchronizing", counter, iq_to_counter(buff[1]), counter_to_iq(counter), buff[1], buff_idx)
-        end
+        #if show_sync
+        #    @info("FPGA pattern synchronizing", counter, iq_to_counter(buff[1]), counter_to_iq(counter), buff[1], buff_idx)
+        #end
         counter = iq_to_counter(buff[1])
         if buff_idx > 0
             error_count += 1
@@ -62,7 +63,7 @@ function verify_fpga_pattern_buffer(buff::AbstractArray{Complex{Int16}}, buff_id
     for idx in 1:step:length(buff)
         if buff[idx] != counter_to_iq(counter)
             if show_mismatch
-                @warn("FPGA pattern skip", received=buff[idx], counter_to_iq(counter), buff_idx)
+                @warn("FPGA pattern skip", received = buff[idx], counter_to_iq(counter), buff_idx)
             end
             error_count += 1
         end
@@ -74,26 +75,30 @@ function verify_fpga_pattern_buffer(buff::AbstractArray{Complex{Int16}}, buff_id
     return error_count
 end
 
-function verify_buffer(buff::AbstractArray{Complex{Int16}}, buff_idx::Int, lfsr_mode::Bool; show_mismatch::Bool = false, show_sync::Bool = true)
+function verify_buffer(buff::AbstractArray{Complex{Int16}}, buff_idx::Int, lfsr_mode::Bool; show_mismatch::Bool=false, show_sync::Bool=true, _counter=Ref{Int32}(0))
     # un-sign-extend since the soapysdr-xtrx is doing sign extension within itself
     un_sign_extend!(buff)
 
     if lfsr_mode
         return verify_lfsr_buffer(buff, buff_idx; show_mismatch)
     else
-        return verify_fpga_pattern_buffer(buff, buff_idx; show_mismatch, show_sync)
+        return verify_fpga_pattern_buffer(buff, buff_idx; show_mismatch, show_sync, _counter)
     end
 end
 
-function dma_test(dev_args;use_gpu=false, lfsr_mode=false, show_mismatch=false)
+function dma_test(dev_args; use_gpu=false, lfsr_mode=false, show_mismatch=false)
     # GPU: set the DMA target
     dma_mode = use_gpu ? "GPU" : "CPU"
     dev_args["device"] = dma_mode
 
+    to = TimerOutput()
+    _counter = Ref{Int32}(0)
+
     Device(dev_args) do dev
         # get the RX channel
         chan = dev.rx[1]
-
+        #chan.sample_rate = 80u"MHz"
+        dev.master_clock_rate = 100e6
         #SoapySDR.SoapySDRDevice_writeSetting(dev, "RESET_RX_FIFO", "")
 
         if lfsr_mode
@@ -113,8 +118,8 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false, show_mismatch=false)
         #       but this also works with the FPGA's loopback
 
         # open RX stream
-        stream = SoapySDR.Stream(ComplexF32, [chan])
-        mtu = SoapySDR.SoapySDRDevice_getStreamMTU(dev, stream)
+        stream = SoapySDR.Stream([chan])
+        mtu = stream.mtu
         num_channels = Int(length(dev.rx))
 
         wr_nbufs = SoapySDR.SoapySDRDevice_getNumDirectAccessBuffers(dev, stream)
@@ -135,11 +140,11 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false, show_mismatch=false)
         overflow_events = 0
 
         # When running on GPU, we need to copy over to CPU for verification
-        cpu_buff = Vector{Complex{Int16}}(undef, mtu*num_channels)
+        cpu_buff = Vector{Complex{Int16}}(undef, mtu * num_channels)
 
         @info "Receiving data using $dma_mode with $(lfsr_mode ? "LFSR" : "pattern")..."
         SoapySDR.activate!(stream) do
-            time = @elapsed for i in 1:5000
+            time = @elapsed for i in 1:50000
                 @timeit to "acquire" err, handle, flags, timeNs = SoapySDR.SoapySDRDevice_acquireReadBuffer(dev, stream, buffs)
                 if err == SoapySDR.SOAPY_SDR_OVERFLOW
                     overflow_events += 1
@@ -150,7 +155,7 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false, show_mismatch=false)
 
                 # uncomment to dump the DMA buffer states
                 #if i%32 == 0
-                    #println(unsafe_string(SoapySDR.SoapySDRDevice_readSetting(dev, "DMA_BUFFERS")))
+                #println(unsafe_string(SoapySDR.SoapySDRDevice_readSetting(dev, "DMA_BUFFERS")))
                 #end
 
                 prev_error_count = error_count
@@ -165,13 +170,13 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false, show_mismatch=false)
                     # but that requires more careful design that's out of scope here.
 
                     # copy the array over to the CPU for validation
-                    copyto!(cpu_buff, unsafe_wrap(CuArray{Complex{Int16}, 1}, reinterpret(CuPtr{Complex{Int16}}, buffs[1]), Int(length(cpu_buff))))
+                    copyto!(cpu_buff, unsafe_wrap(CuArray{Complex{Int16},1}, reinterpret(CuPtr{Complex{Int16}}, buffs[1]), Int(length(cpu_buff))))
 
-                    error_count += verify_buffer(cpu_buff, total_buffer_count, lfsr_mode)
+                    error_count += verify_buffer(cpu_buff, total_buffer_count, lfsr_mode; _counter)
                     synchronize()   # data without running into overflows
                 else
-                    buff = unsafe_wrap(Array{Complex{Int16}}, buffs[1], Int(mtu*num_channels))
-                    error_count += verify_buffer(buff, total_buffer_count, lfsr_mode)
+                    buff = unsafe_wrap(Array{Complex{Int16}}, buffs[1], Int(mtu * num_channels))
+                    error_count += verify_buffer(buff, total_buffer_count, lfsr_mode; _counter)
                 end
 
                 if prev_error_count != error_count
@@ -179,7 +184,7 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false, show_mismatch=false)
                 end
 
                 @timeit to "release" SoapySDR.SoapySDRDevice_releaseReadBuffer(dev, stream, handle)
-                total_bytes += mtu*num_channels*sizeof(Complex{Int16})
+                total_bytes += mtu * num_channels * sizeof(Complex{Int16})
                 total_buffer_count += 1
             end
             show(to)
@@ -195,18 +200,25 @@ function dma_test(dev_args;use_gpu=false, lfsr_mode=false, show_mismatch=false)
     end
 end
 
+
 function main()
-    for dev_args in Devices(driver="XTRX")
-        GC.enable(false)
-        try
-            dma_test(dev_args; use_gpu=false, lfsr_mode=true)
-            dma_test(dev_args; use_gpu=false, lfsr_mode=false)
-            dma_test(dev_args; use_gpu=true,  lfsr_mode=true)
-            dma_test(dev_args; use_gpu=true,  lfsr_mode=false)
-        catch e
-            @error "Test failed" path=dev_args["path"] serial=dev_args["serial"] exception=(e, catch_backtrace())
+    procs = []
+    for dev_args in filter(d -> d["serial"] != "ce5241b884854", collect(Devices(driver="XTRX")))
+        p = Threads.@spawn begin
+            GC.enable(false)
+            try
+                dma_test(dev_args; use_gpu=false, lfsr_mode=true)
+                dma_test(dev_args; use_gpu=false, lfsr_mode=false)
+                # TODO: GPU not working for xync
+                #dma_test(dev_args; use_gpu=true, lfsr_mode=true)
+                #dma_test(dev_args; use_gpu=true, lfsr_mode=false)
+            catch e
+                @error "Test failed" path = dev_args["path"] serial = dev_args["serial"] exception = (e, catch_backtrace())
+            end
         end
+        push!(procs, p)
     end
+    wait.(procs)
 end
 
 isinteractive() || main()
