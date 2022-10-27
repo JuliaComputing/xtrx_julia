@@ -177,8 +177,6 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
     this->setMasterClockRate(80.0e6);
 
     // some defaults to avoid throwing
-    _cachedSampleRates[SOAPY_SDR_RX] = 1e6;
-    _cachedSampleRates[SOAPY_SDR_TX] = 1e6;
     for (size_t i = 0; i < 2; i++) {
         _cachedFreqValues[SOAPY_SDR_RX][i]["RF"] = 1e9;
         _cachedFreqValues[SOAPY_SDR_TX][i]["RF"] = 1e9;
@@ -748,13 +746,11 @@ void SoapyXTRX::setSampleRate(const int direction, const size_t,
             LMS7002M_txtsp_set_interp(_lms, LMS_CHAB, 2);
             LMS7002M_configure_lml_port(_lms, LMS_PORT2, LMS_TX, 1);
         }
-
-        _cachedSampleRates[direction] = rate;
     }
 }
 
-double SoapyXTRX::getSampleRate(const int direction, const size_t) const {
-    return _cachedSampleRates.at(direction);
+double SoapyXTRX::getSampleRate(const int /*direction*/, const size_t) const {
+    return getMasterClockRate() / 8;
 }
 
 std::vector<double> SoapyXTRX::listSampleRates(const int /*direction*/,

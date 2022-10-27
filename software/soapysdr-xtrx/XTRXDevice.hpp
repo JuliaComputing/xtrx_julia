@@ -165,8 +165,6 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
     std::vector<double> listSampleRates(const int direction,
                                         const size_t) const override;
 
-    std::map<int, double> _cachedSampleRates;
-
     // BW filter API
     void setBandwidth(const int direction, const size_t channel,
                       const double bw) override;
