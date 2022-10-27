@@ -52,18 +52,18 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
     ~SoapyXTRX(void);
 
     // Identification API
-    std::string getDriverKey(void) const { return "XTRX over LitePCIe"; }
-    std::string getHardwareKey(void) const { return "Fairwaves XTRX"; }
-    SoapySDR::Kwargs getHardwareInfo(void) const;
+    std::string getDriverKey(void) const override { return "XTRX over LitePCIe"; }
+    std::string getHardwareKey(void) const override { return "Fairwaves XTRX"; }
+    SoapySDR::Kwargs getHardwareInfo(void) const override;
 
 
     // Channels API
-    size_t getNumChannels(const int) const { return 2; }
-    bool getFullDuplex(const int, const size_t) const { return true; }
+    size_t getNumChannels(const int) const override { return 2; }
+    bool getFullDuplex(const int, const size_t) const override { return true; }
 
     std::string getNativeStreamFormat(const int /*direction*/,
                                       const size_t /*channel*/,
-                                      double &fullScale) const {
+                                      double &fullScale) const override {
         fullScale = 4096;
         return SOAPY_SDR_CS16;
     }
@@ -72,7 +72,7 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
     SoapySDR::Stream *setupStream(const int direction,
                                   const std::string &format,
                                   const std::vector<size_t> &channels,
-                                  const SoapySDR::Kwargs &args);
+                                  const SoapySDR::Kwargs &args) override;
     void closeStream(SoapySDR::Stream *stream) override;
     int activateStream(SoapySDR::Stream *stream, const int flags,
                        const long long timeNs, const size_t numElems) override;
@@ -92,7 +92,7 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
                             const size_t numElems, int &flags,
                             const long long timeNs = 0) override;
 
-    std::vector<std::string> getStreamFormats(const int direction, const size_t channel) const;
+    std::vector<std::string> getStreamFormats(const int direction, const size_t channel) const override;
 
 
     // Antenna API
