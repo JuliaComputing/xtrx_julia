@@ -341,33 +341,8 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
         std::vector<size_t> channels;
     };
 
-    struct RXStream: Stream {
-        uint32_t vga_gain;
-        uint32_t lna_gain;
-        uint8_t amp_gain;
-        double samplerate;
-        uint32_t bandwidth;
-        uint64_t frequency;
-
-        bool overflow;
-    };
-
-    struct TXStream: Stream {
-        uint32_t vga_gain;
-        uint8_t amp_gain;
-        double samplerate;
-        uint32_t bandwidth;
-        uint64_t frequency;
-        bool bias;
-
-        bool underflow;
-
-        bool burst_end;
-        int32_t burst_samps;
-    } ;
-
-    RXStream _rx_stream;
-    TXStream _tx_stream;
+    Stream _rx_stream;
+    Stream _tx_stream;
 
     LMS7002M_dir_t dir2LMS(const int direction) const {
         return (direction == SOAPY_SDR_RX) ? LMS_RX : LMS_TX;
