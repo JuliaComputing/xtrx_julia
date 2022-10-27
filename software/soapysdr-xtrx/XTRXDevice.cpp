@@ -72,7 +72,7 @@ void dma_set_loopback(int fd, bool loopback_enable) {
 }
 
 SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
-    : _fd(-1), _lms(NULL), _masterClockRate(80.0e6), _refClockRate(26e6) {
+    : _fd(-1), _lms(NULL), _refClockRate(26e6) {
     LMS7_set_log_handler(&customLogHandler);
     LMS7_set_log_level(LMS7_TRACE);
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyXTRX initializing...");
@@ -848,24 +848,24 @@ std::vector<double> SoapyXTRX::listBandwidths(const int direction,
  ******************************************************************/
 
 double SoapyXTRX::getTSPRate() const {
-    return _masterClockRate / 4;
+    return getMasterClockRate() / 4;
 }
 
 void SoapyXTRX::setMasterClockRate(const double rate) {
     std::lock_guard<std::mutex> lock(_mutex);
-
+    double factual = 0;
     int ret =
-        LMS7002M_set_data_clock(_lms, _refClockRate, rate, &_masterClockRate);
+        LMS7002M_set_data_clock(_lms, _refClockRate, rate, &factual);
     if (ret != 0) {
         SoapySDR::logf(SOAPY_SDR_ERROR, "LMS7002M_set_data_clock(%f MHz) -> %d",
                        rate / 1e6, ret);
         throw std::runtime_error("XTRX fail LMS7002M_set_data_clock()");
     }
     SoapySDR::logf(SOAPY_SDR_TRACE, "LMS7002M_set_data_clock(%f MHz) -> %f MHz",
-                   rate / 1e6, _masterClockRate / 1e6);
+                   rate / 1e6, factual / 1e6);
 }
 
-double SoapyXTRX::getMasterClockRate(void) const { return _masterClockRate; }
+double SoapyXTRX::getMasterClockRate(void) const { return LMS7002M_get_data_clock(_lms, _refClockRate); }
 
 /*!
  * Set the reference clock rate of the device.
@@ -1173,9 +1173,11 @@ void SoapyXTRX::writeSetting(const std::string &key, const std::string &value) {
         LMS7002M_tbb_enable(_lms, LMS_CHAB, value == "TRUE");
     else if (key == "TRF_ENABLE_LOOPBACK")
         LMS7002M_trf_enable_loopback(_lms, LMS_CHAB, value == "TRUE");
-    else if (key == "CGEN")
-        LMS7002M_set_data_clock(_lms, _refClockRate, std::stod(value)*1e6, &_masterClockRate);
-    else if (key == "RXTSP_TSG_CONST") {
+    else if (key == "CGEN") {
+        double factual = 0;
+        LMS7002M_set_data_clock(_lms, _refClockRate, std::stod(value) * 1e6,
+                                &factual);
+    } else if (key == "RXTSP_TSG_CONST") {
         const int ampl = std::stoi(value);
         LMS7002M_rxtsp_tsg_const(_lms, LMS_CHAB, ampl, 0);
     } else if (key == "TXTSP_TSG_CONST") {
