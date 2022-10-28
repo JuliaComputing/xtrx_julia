@@ -103,8 +103,6 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
     std::string getAntenna(const int direction,
                            const size_t channel) const override;
 
-    std::map<int, std::map<size_t, std::string>> _cachedAntValues;
-
     // Frontend corrections API
     bool hasDCOffsetMode(const int direction,
                          const size_t channel) const override;
@@ -390,7 +388,6 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
     int _fd;
     LMS7002M_t *_lms;
     double _refClockRate;
-    std::string _clockSource;
 
     // calibration data
     std::vector<std::map<std::string, std::string>> _calData;
