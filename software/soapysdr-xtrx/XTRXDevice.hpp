@@ -155,9 +155,6 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
     SoapySDR::RangeList getFrequencyRange(const int, const size_t,
                                           const std::string &) const override;
 
-    std::map<int, std::map<size_t, std::map<std::string, double>>>
-        _cachedFreqValues;
-
     // Sample Rate API
     void setSampleRate(const int direction, const size_t,
                        const double rate) override;
