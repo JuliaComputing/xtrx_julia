@@ -689,7 +689,6 @@ void SoapyXTRX::setFrequency(const int direction, const size_t channel,
         if (direction == SOAPY_SDR_TX)
             LMS7002M_txtsp_set_freq(_lms, ch2LMS(channel),
                                     frequency / baseRate);
-        _cachedFreqValues[direction][channel][name] = frequency;
     } else {
         throw std::runtime_error("SoapyXTRX::setFrequency(" +
                                  std::to_string(frequency / 1e6) +
@@ -701,7 +700,12 @@ double SoapyXTRX::getFrequency(const int direction, const size_t channel,
                                const std::string &name) const {
     if (name == "RF")
         return LMS7002M_get_lo_freq(_lms, dir2LMS(direction), _refClockRate);
-    return _cachedFreqValues.at(direction).at(channel).at(name);
+    else if (name == "BB"){
+        if (direction == SOAPY_SDR_RX)
+            return LMS7002M_rxtsp_get_freq(_lms, ch2LMS(channel));
+        else if (direction == SOAPY_SDR_TX)
+            return LMS7002M_txtsp_get_freq(_lms, ch2LMS(channel));
+    }
 }
 
 std::vector<std::string> SoapyXTRX::listFrequencies(const int /*direction*/,
