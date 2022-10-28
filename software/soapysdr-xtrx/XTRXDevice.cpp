@@ -178,8 +178,6 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
 
     // some defaults to avoid throwing
     for (size_t i = 0; i < 2; i++) {
-        _cachedFreqValues[SOAPY_SDR_RX][i]["RF"] = 1e9;
-        _cachedFreqValues[SOAPY_SDR_TX][i]["RF"] = 1e9;
         _cachedFreqValues[SOAPY_SDR_RX][i]["BB"] = 0;
         _cachedFreqValues[SOAPY_SDR_TX][i]["BB"] = 0;
         this->setAntenna(SOAPY_SDR_RX, i, "LNAW");
@@ -657,11 +655,7 @@ void SoapyXTRX::setFrequency(const int direction, const size_t channel,
             throw std::runtime_error("SoapyXTRX::setFrequency(" +
                                      std::to_string(frequency / 1e6) +
                                      " MHz) failed - " + std::to_string(ret));
-        _cachedFreqValues[direction][0][name] = actualFreq;
-        _cachedFreqValues[direction][1][name] = actualFreq;
-    }
-
-    if (name == "BB") {
+    } else if (name == "BB") {
         const double baseRate = this->getTSPRate();
         if (direction == SOAPY_SDR_RX)
             LMS7002M_rxtsp_set_freq(_lms, ch2LMS(channel),
@@ -670,11 +664,17 @@ void SoapyXTRX::setFrequency(const int direction, const size_t channel,
             LMS7002M_txtsp_set_freq(_lms, ch2LMS(channel),
                                     frequency / baseRate);
         _cachedFreqValues[direction][channel][name] = frequency;
+    } else {
+        throw std::runtime_error("SoapyXTRX::setFrequency(" +
+                                 std::to_string(frequency / 1e6) +
+                                 " MHz) failed - unknown name: " + name);
     }
 }
 
 double SoapyXTRX::getFrequency(const int direction, const size_t channel,
                                const std::string &name) const {
+    if (name == "RF")
+        return LMS7002M_get_lo_freq(_lms, dir2LMS(direction), _refClockRate);
     return _cachedFreqValues.at(direction).at(channel).at(name);
 }
 
