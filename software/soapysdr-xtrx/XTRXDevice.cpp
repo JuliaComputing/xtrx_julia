@@ -178,8 +178,6 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
 
     // some defaults to avoid throwing
     for (size_t i = 0; i < 2; i++) {
-        _cachedFreqValues[SOAPY_SDR_RX][i]["BB"] = 0;
-        _cachedFreqValues[SOAPY_SDR_TX][i]["BB"] = 0;
         this->setAntenna(SOAPY_SDR_RX, i, "LNAW");
         this->setAntenna(SOAPY_SDR_TX, i, "BAND1");
 
@@ -377,14 +375,42 @@ void SoapyXTRX::setAntenna(const int direction, const size_t channel,
         LMS7002M_trf_select_band(_lms, ch2LMS(channel), band);
         litepcie_writel(_fd, CSR_RF_SWITCHES_TX_ADDR, tx_rf_switch);
     }
-    _cachedAntValues[direction][channel] = name;
 }
 
 std::string SoapyXTRX::getAntenna(const int direction,
                                   const size_t channel) const {
-    return _cachedAntValues.at(direction).at(channel);
+    if (direction == SOAPY_SDR_RX) {
+        int path = LMS7002M_rfe_get_path(_lms, ch2LMS(channel));
+        int rf_switch = litepcie_readl(_fd, CSR_RF_SWITCHES_RX_ADDR);
+        if (path == LMS7002M_RFE_LNAH && rf_switch == 2)
+            return "LNAH";
+        else if (path == LMS7002M_RFE_LNAL && rf_switch == 1)
+            return "LNAL";
+        else if (path == LMS7002M_RFE_LNAW && rf_switch == 0)
+            return "LNAW";
+        else if (path == LMS7002M_RFE_LB1)
+            return "LB1";
+        else if (path == LMS7002M_RFE_LB2)
+            return "LB2";
+        else
+            throw std::runtime_error(
+                "SoapyXTRX::getAntenna(RX) - antenna in path: " +
+                std::to_string(path) +
+                " rf switch: " + std::to_string(rf_switch));
+    } else if (direction == SOAPY_SDR_TX) {
+        int band = LMS7002M_trf_get_band(_lms, ch2LMS(channel));
+        int rf_switch = litepcie_readl(_fd, CSR_RF_SWITCHES_TX_ADDR);
+        if (band == 1 && rf_switch == 1)
+            return "BAND1";
+        else if (band == 2 && rf_switch == 0)
+            return "BAND2";
+        else
+            throw std::runtime_error(
+                "SoapyXTRX::getAntenna(TX) - antenna in band: " +
+                std::to_string(band) +
+                " rf switch: " + std::to_string(rf_switch));
+    }
 }
-
 
 /*******************************************************************
  * Frontend corrections API
