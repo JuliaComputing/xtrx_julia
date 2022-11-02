@@ -129,9 +129,14 @@ function stream_data(s_rx::SoapySDR.Stream{T}, end_condition::Union{Integer,Base
         end
 
         flags = Ref{Int}(0)
-        read!(s_rx, split_matrix(buff); flags)
-        if flags[] & SoapySDR.SOAPY_SDR_OVERFLOW != 0
-            _num_overflows[] += 1
+        try
+            read!(s_rx, split_matrix(buff); flags, throw_error = true)
+        catch e
+            if e isa SoapySDR.SoapySDRDeviceError && e.status == SoapySDR.SOAPY_SDR_OVERFLOW
+                _num_overflows[] += 1
+            else
+                rethrow(e)
+            end
         end
 
         buff_idx += 1
@@ -152,12 +157,20 @@ function stream_data(s_tx::SoapySDR.Stream{T}, in::Channel{Matrix{T}}) where {T 
             # Consume channel and spit out into `s_tx`
             consume_channel(in) do buff
                 flags = Ref{Int}(0)
-                write(s_tx, split_matrix(buff); flags, timeout=0.1u"s")
-                if flags[] & SoapySDR.SOAPY_SDR_UNDERFLOW != 0
-                    _num_underflows[] += 1
-                end
-                if flags[] & SoapySDR.SOAPY_SDR_TIMEOUT != 0
-                    println("T")
+                try
+                    write(s_tx, split_matrix(buff); flags, timeout=0.1u"s", throw_error = true)
+                catch e
+                    if e isa SoapySDR.SoapySDRDeviceError
+                        if e.status == SoapySDR.SOAPY_SDR_UNDERFLOW
+                            _num_underflows[] += 1
+                        elseif e.status == SoapySDR.SOAPY_SDR_TIMEOUT
+                            println("T")
+                        else
+                            println("E")
+                        end
+                    else
+                        rethrow(e)
+                    end
                 end
             end
 
