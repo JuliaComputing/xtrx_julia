@@ -95,40 +95,42 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
     SoapySDR::logf(SOAPY_SDR_INFO, "Board revision: %d", this->board_revision);
     SoapySDR::logf(SOAPY_SDR_INFO, getXTRXIdentification(_fd).c_str());
 
-    // reset the LMS7002M
-    litepcie_writel(_fd, CSR_LMS7002M_CONTROL_ADDR,
-        1 * (1 << CSR_LMS7002M_CONTROL_RESET_OFFSET)
-    );
-    litepcie_writel(_fd, CSR_LMS7002M_CONTROL_ADDR,
-        0 * (1 << CSR_LMS7002M_CONTROL_RESET_OFFSET)
-    );
+    bool reset = (args.count("reset") == 0) ? args.at("reset") == "false" : true;
 
-    // reset XTRX-specific LMS7002M controls
-    litepcie_writel(_fd, CSR_LMS7002M_CONTROL_ADDR,
-        0 * (1 << CSR_LMS7002M_CONTROL_POWER_DOWN_OFFSET) |
-        1 * (1 << CSR_LMS7002M_CONTROL_TX_ENABLE_OFFSET)  |
-        1 * (1 << CSR_LMS7002M_CONTROL_RX_ENABLE_OFFSET)  |
-        0 * (1 << CSR_LMS7002M_CONTROL_TX_RX_LOOPBACK_ENABLE_OFFSET)
-    );
+    if (reset) {
+        // reset the LMS7002M
+        litepcie_writel(_fd, CSR_LMS7002M_CONTROL_ADDR,
+                        1 * (1 << CSR_LMS7002M_CONTROL_RESET_OFFSET));
+        litepcie_writel(_fd, CSR_LMS7002M_CONTROL_ADDR,
+                        0 * (1 << CSR_LMS7002M_CONTROL_RESET_OFFSET));
 
-    //Enable DMA Synchronizer
-    #ifdef CSR_PCIE_DMA0_SYNCHRONIZER_ENABLE_ADDR
-    litepcie_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_ENABLE_ADDR, 0b10);
-    #endif
+        // reset XTRX-specific LMS7002M controls
+        litepcie_writel(
+            _fd, CSR_LMS7002M_CONTROL_ADDR,
+            0 * (1 << CSR_LMS7002M_CONTROL_POWER_DOWN_OFFSET) |
+                1 * (1 << CSR_LMS7002M_CONTROL_TX_ENABLE_OFFSET) |
+                1 * (1 << CSR_LMS7002M_CONTROL_RX_ENABLE_OFFSET) |
+                0 * (1 << CSR_LMS7002M_CONTROL_TX_RX_LOOPBACK_ENABLE_OFFSET));
 
-    // reset other FPGA peripherals
-    writeSetting("FPGA_DMA_LOOPBACK_ENABLE", "FALSE");
-    writeSetting("FPGA_TX_PATTERN", "0");
-    writeSetting("FPGA_RX_PATTERN", "0");
-    writeSetting("FPGA_RX_DELAY", "16");
-    writeSetting("FPGA_TX_DELAY", "16");
+        // Enable DMA Synchronizer
+        litepcie_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_ENABLE_ADDR, 0b10);
+
+        // reset other FPGA peripherals
+        writeSetting("FPGA_DMA_LOOPBACK_ENABLE", "FALSE");
+        writeSetting("FPGA_TX_PATTERN", "0");
+        writeSetting("FPGA_RX_PATTERN", "0");
+        writeSetting("FPGA_RX_DELAY", "16");
+        writeSetting("FPGA_TX_DELAY", "16");
+    }
 
     // setup LMS7002M
     _lms = LMS7002M_create(litepcie_interface_transact, &_fd);
     if (_lms == NULL)
         throw std::runtime_error(
             "SoapyXTRX(): failed to LMS7002M_create()");
-    LMS7002M_reset(_lms);
+    if (reset) {
+        LMS7002M_reset(_lms);
+    }
     LMS7002M_set_spi_mode(_lms, 4);
 
     // read info register
@@ -137,69 +139,71 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
                    LMS7002M_regs(_lms)->reg_0x002f_rev,
                    LMS7002M_regs(_lms)->reg_0x002f_ver);
 
-    // set clock to Reference Clock Source
-    if (args.count("clock") == 0) {
-        this->setClockSource("internal");
-    } else {
-        std::string clock = args.at("clock");
-        this->setClockSource(clock);
-    }
+    if (reset) {
+        // set clock to Reference Clock Source
+        if (args.count("clock") == 0) {
+            this->setClockSource("internal");
+        } else {
+            std::string clock = args.at("clock");
+            this->setClockSource(clock);
+        }
 
-    // configure data port directions and data clock rates
-    LMS7002M_configure_lml_port(_lms, LMS_PORT2, LMS_TX, 1);
-    LMS7002M_configure_lml_port(_lms, LMS_PORT1, LMS_RX, 1);
+        // configure data port directions and data clock rates
+        LMS7002M_configure_lml_port(_lms, LMS_PORT2, LMS_TX, 1);
+        LMS7002M_configure_lml_port(_lms, LMS_PORT1, LMS_RX, 1);
 
-    // enable components
-    LMS7002M_afe_enable(_lms, LMS_TX, LMS_CHA, true);
-    LMS7002M_afe_enable(_lms, LMS_TX, LMS_CHB, true);
-    LMS7002M_afe_enable(_lms, LMS_RX, LMS_CHA, true);
-    LMS7002M_afe_enable(_lms, LMS_RX, LMS_CHB, true);
-    LMS7002M_rxtsp_enable(_lms, LMS_CHA, true);
-    LMS7002M_rxtsp_enable(_lms, LMS_CHB, true);
-    LMS7002M_txtsp_enable(_lms, LMS_CHA, true);
-    LMS7002M_txtsp_enable(_lms, LMS_CHB, true);
-    LMS7002M_rbb_enable(_lms, LMS_CHA, true);
-    LMS7002M_rbb_enable(_lms, LMS_CHB, true);
-    LMS7002M_tbb_enable(_lms, LMS_CHA, true);
-    LMS7002M_tbb_enable(_lms, LMS_CHB, true);
-    LMS7002M_rfe_enable(_lms, LMS_CHA, true);
-    LMS7002M_rfe_enable(_lms, LMS_CHB, true);
-    LMS7002M_trf_enable(_lms, LMS_CHA, true);
-    LMS7002M_trf_enable(_lms, LMS_CHB, true);
-    LMS7002M_sxx_enable(_lms, LMS_RX, true);
-    LMS7002M_sxx_enable(_lms, LMS_TX, true);
+        // enable components
+        LMS7002M_afe_enable(_lms, LMS_TX, LMS_CHA, true);
+        LMS7002M_afe_enable(_lms, LMS_TX, LMS_CHB, true);
+        LMS7002M_afe_enable(_lms, LMS_RX, LMS_CHA, true);
+        LMS7002M_afe_enable(_lms, LMS_RX, LMS_CHB, true);
+        LMS7002M_rxtsp_enable(_lms, LMS_CHA, true);
+        LMS7002M_rxtsp_enable(_lms, LMS_CHB, true);
+        LMS7002M_txtsp_enable(_lms, LMS_CHA, true);
+        LMS7002M_txtsp_enable(_lms, LMS_CHB, true);
+        LMS7002M_rbb_enable(_lms, LMS_CHA, true);
+        LMS7002M_rbb_enable(_lms, LMS_CHB, true);
+        LMS7002M_tbb_enable(_lms, LMS_CHA, true);
+        LMS7002M_tbb_enable(_lms, LMS_CHB, true);
+        LMS7002M_rfe_enable(_lms, LMS_CHA, true);
+        LMS7002M_rfe_enable(_lms, LMS_CHB, true);
+        LMS7002M_trf_enable(_lms, LMS_CHA, true);
+        LMS7002M_trf_enable(_lms, LMS_CHB, true);
+        LMS7002M_sxx_enable(_lms, LMS_RX, true);
+        LMS7002M_sxx_enable(_lms, LMS_TX, true);
 
-    // XTRX-specific configuration
-    LMS7002M_ldo_enable(_lms, true, LMS7002M_LDO_ALL);
-    LMS7002M_xbuf_share_tx(_lms, true);
+        // XTRX-specific configuration
+        LMS7002M_ldo_enable(_lms, true, LMS7002M_LDO_ALL);
+        LMS7002M_xbuf_share_tx(_lms, true);
 
-    // turn the clocks on (tested frequencies: 61.44MHz, 80MHz, 122.88MHz)
-    this->setMasterClockRate(80.0e6);
+        // turn the clocks on (tested frequencies: 61.44MHz, 80MHz, 122.88MHz)
+        this->setMasterClockRate(80.0e6);
 
-    // some defaults to avoid throwing
-    for (size_t i = 0; i < 2; i++) {
-        this->setAntenna(SOAPY_SDR_RX, i, "LNAW");
-        this->setAntenna(SOAPY_SDR_TX, i, "BAND1");
+        // some defaults to avoid throwing
+        for (size_t i = 0; i < 2; i++) {
+            this->setAntenna(SOAPY_SDR_RX, i, "LNAW");
+            this->setAntenna(SOAPY_SDR_TX, i, "BAND1");
 
-        // Use the same default gains as LimeSDR
-        // LimeSuiteGUI lists these as:
-        //   RFE page:
-        //     LNA: Gmax (maps to 30dB)
-        //     Loopback: Gmax-40 (not listed here)
-        //     TIA: Gmax-3 (maps to 9dB)
-        //   RBB page:
-        //     PGA Gain: 6dB
-        //   TRF page:
-        //     TXPAD gain control: 0
-        this->setGain(SOAPY_SDR_RX, i, "LNA", 30.0);
-        this->setGain(SOAPY_SDR_RX, i, "TIA", 9.0);
-        this->setGain(SOAPY_SDR_RX, i, "PGA", 6.0);
-        this->setGain(SOAPY_SDR_TX, i, "PAD", 0.0);
+            // Use the same default gains as LimeSDR
+            // LimeSuiteGUI lists these as:
+            //   RFE page:
+            //     LNA: Gmax (maps to 30dB)
+            //     Loopback: Gmax-40 (not listed here)
+            //     TIA: Gmax-3 (maps to 9dB)
+            //   RBB page:
+            //     PGA Gain: 6dB
+            //   TRF page:
+            //     TXPAD gain control: 0
+            this->setGain(SOAPY_SDR_RX, i, "LNA", 30.0);
+            this->setGain(SOAPY_SDR_RX, i, "TIA", 9.0);
+            this->setGain(SOAPY_SDR_RX, i, "PGA", 6.0);
+            this->setGain(SOAPY_SDR_TX, i, "PAD", 0.0);
 
-        _cachedFilterBws[SOAPY_SDR_RX][i] = 10e6;
-        _cachedFilterBws[SOAPY_SDR_TX][i] = 10e6;
-        this->setIQBalance(SOAPY_SDR_RX, i, std::polar(1.0, 0.0));
-        this->setIQBalance(SOAPY_SDR_TX, i, std::polar(1.0, 0.0));
+            _cachedFilterBws[SOAPY_SDR_RX][i] = 10e6;
+            _cachedFilterBws[SOAPY_SDR_TX][i] = 10e6;
+            this->setIQBalance(SOAPY_SDR_RX, i, std::polar(1.0, 0.0));
+            this->setIQBalance(SOAPY_SDR_TX, i, std::polar(1.0, 0.0));
+        }
     }
 
     // set-up the DMA
