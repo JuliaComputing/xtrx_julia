@@ -138,9 +138,6 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
     SoapySDR::Range getGainRange(const int direction, const size_t channel,
                                  const std::string &name) const override;
 
-    std::map<int, std::map<size_t, std::map<std::string, double>>>
-        _cachedGainValues;
-
     // Frequency API
     void
     setFrequency(const int direction, const size_t channel, const std::string &,
