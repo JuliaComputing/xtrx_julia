@@ -95,7 +95,9 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
     SoapySDR::logf(SOAPY_SDR_INFO, "Board revision: %d", this->board_revision);
     SoapySDR::logf(SOAPY_SDR_INFO, getXTRXIdentification(_fd).c_str());
 
-    bool reset = (args.count("reset") == 0) ? args.at("reset") == "false" : true;
+    bool reset = true;
+    if (args.count("reset") != 0)
+        reset = args.at("reset") == "false" ? false : true;
 
     if (reset) {
         // reset the LMS7002M
