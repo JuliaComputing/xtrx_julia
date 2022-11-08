@@ -27,6 +27,7 @@
 #include <LMS7002M/LMS7002M_logger.h>
 #include <chrono>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <sys/mman.h>
 
@@ -185,21 +186,6 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
         for (size_t i = 0; i < 2; i++) {
             this->setAntenna(SOAPY_SDR_RX, i, "LNAW");
             this->setAntenna(SOAPY_SDR_TX, i, "BAND1");
-
-            // Use the same default gains as LimeSDR
-            // LimeSuiteGUI lists these as:
-            //   RFE page:
-            //     LNA: Gmax (maps to 30dB)
-            //     Loopback: Gmax-40 (not listed here)
-            //     TIA: Gmax-3 (maps to 9dB)
-            //   RBB page:
-            //     PGA Gain: 6dB
-            //   TRF page:
-            //     TXPAD gain control: 0
-            this->setGain(SOAPY_SDR_RX, i, "LNA", 30.0);
-            this->setGain(SOAPY_SDR_RX, i, "TIA", 9.0);
-            this->setGain(SOAPY_SDR_RX, i, "PGA", 6.0);
-            this->setGain(SOAPY_SDR_TX, i, "PAD", 0.0);
 
             _cachedFilterBws[SOAPY_SDR_RX][i] = 10e6;
             _cachedFilterBws[SOAPY_SDR_TX][i] = 10e6;
@@ -597,13 +583,7 @@ void SoapyXTRX::setGain(const int direction, const size_t channel, const double 
         auto actualLNA = LMS7002M_rfe_set_lna_dist(_lms, ch2LMS(channel), lna+1);
         auto actualTIA = LMS7002M_rfe_set_tia_dist(_lms, ch2LMS(channel), tia+1);
         auto actualPGA = LMS7002M_rbb_set_pga_dist(_lms, ch2LMS(channel), pga);
-
-//        printf("Set gains: LNA: %f, TIA: %f, PGA: %f \n", actualLNA, actualTIA, actualPGA);
-
-        _cachedGainValues[direction][channel]["LNA"] = actualLNA;
-        _cachedGainValues[direction][channel]["TIA"] = actualTIA;
-        _cachedGainValues[direction][channel]["PGA"] = actualPGA;
-    }      
+    }
 }
 
 void SoapyXTRX::setGain(const int direction, const size_t channel,
@@ -613,38 +593,42 @@ void SoapyXTRX::setGain(const int direction, const size_t channel,
     SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyXTRX::setGain(%s, ch%d, %s, %f dB)",
                    dir2Str(direction), channel, name.c_str(), value);
 
-    double &actualValue = _cachedGainValues[direction][channel][name];
-
     if (direction == SOAPY_SDR_RX and name == "LNA") {
-        actualValue = LMS7002M_rfe_set_lna(_lms, ch2LMS(channel), value);
-    }
-
-    if (direction == SOAPY_SDR_RX and name == "LB_LNA") {
-        actualValue =
-            LMS7002M_rfe_set_loopback_lna(_lms, ch2LMS(channel), value);
-    }
-
-    if (direction == SOAPY_SDR_RX and name == "TIA") {
-        actualValue = LMS7002M_rfe_set_tia(_lms, ch2LMS(channel), value);
-    }
-
-    if (direction == SOAPY_SDR_RX and name == "PGA") {
-        actualValue = LMS7002M_rbb_set_pga(_lms, ch2LMS(channel), value);
-    }
-
-    if (direction == SOAPY_SDR_TX and name == "PAD") {
-        actualValue = LMS7002M_trf_set_pad(_lms, ch2LMS(channel), value);
-    }
-
-    if (direction == SOAPY_SDR_TX and name == "LB_PAD") {
-        actualValue =
-            LMS7002M_trf_set_loopback_pad(_lms, ch2LMS(channel), value);
+        LMS7002M_rfe_set_lna(_lms, ch2LMS(channel), value);
+    } else if (direction == SOAPY_SDR_RX and name == "LB_LNA") {
+        LMS7002M_rfe_set_loopback_lna(_lms, ch2LMS(channel), value);
+    } else if (direction == SOAPY_SDR_RX and name == "TIA") {
+        LMS7002M_rfe_set_tia(_lms, ch2LMS(channel), value);
+    } else if (direction == SOAPY_SDR_RX and name == "PGA") {
+        LMS7002M_rbb_set_pga(_lms, ch2LMS(channel), value);
+    } else if (direction == SOAPY_SDR_TX and name == "PAD") {
+        LMS7002M_trf_set_pad(_lms, ch2LMS(channel), value);
+    } else if (direction == SOAPY_SDR_TX and name == "LB_PAD") {
+        LMS7002M_trf_set_loopback_pad(_lms, ch2LMS(channel), value);
+    } else {
+        throw std::runtime_error("SoapyXTRX::setGain() unknown gain name: " +
+                                 name + " for direction " + dir2Str(direction));
     }
 }
 
 double SoapyXTRX::getGain(const int direction, const size_t channel,
                           const std::string &name) const {
-    return _cachedGainValues.at(direction).at(channel).at(name);
+    if (direction == SOAPY_SDR_RX and name == "LNA") {
+        return LMS7002M_rfe_get_lna(_lms, ch2LMS(channel));
+    } else if (direction == SOAPY_SDR_RX and name == "LB_LNA") {
+        return LMS7002M_rfe_get_loopback_lna(_lms, ch2LMS(channel));
+    } else if (direction == SOAPY_SDR_RX and name == "TIA") {
+        return LMS7002M_rfe_get_tia(_lms, ch2LMS(channel));
+    } else if (direction == SOAPY_SDR_RX and name == "PGA") {
+        return LMS7002M_rbb_get_pga(_lms, ch2LMS(channel));
+    } else if (direction == SOAPY_SDR_TX and name == "PAD") {
+        return LMS7002M_trf_get_pad(_lms, ch2LMS(channel));
+    } else if (direction == SOAPY_SDR_TX and name == "LB_PAD") {
+        return LMS7002M_trf_get_loopback_pad(_lms, ch2LMS(channel));
+    } else {
+        throw std::runtime_error("SoapyXTRX::setGain() unknown gain name: " +
+                                 name + " for direction " + dir2Str(direction));
+    }
 }
 
 SoapySDR::Range SoapyXTRX::getGainRange(const int direction,
