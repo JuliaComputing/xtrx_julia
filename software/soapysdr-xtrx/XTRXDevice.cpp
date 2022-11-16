@@ -483,12 +483,18 @@ void SoapyXTRX::setIQBalance(const int direction, const size_t channel,
         LMS7002M_rxtsp_set_iq_correction(_lms, ch2LMS(channel),
                                          std::arg(balance), std::abs(balance));
     }
-    _cachedIqBalValues[direction][channel] = balance;
 }
 
 std::complex<double> SoapyXTRX::getIQBalance(const int direction,
                                              const size_t channel) const {
-    return _cachedIqBalValues.at(direction).at(channel);
+    double phase, gain;
+    if (direction == SOAPY_SDR_TX)
+        LMS7002M_txtsp_get_iq_correction(_lms, ch2LMS(channel),
+                                            &phase, &gain);
+    else
+        LMS7002M_rxtsp_get_iq_correction(_lms, ch2LMS(channel),
+                                        &phase, &gain);
+    return std::polar(gain, phase);
 }
 
 
