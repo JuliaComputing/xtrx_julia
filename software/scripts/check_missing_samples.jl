@@ -102,7 +102,7 @@ function track_gnss_signal(in::MatrixSizedChannel{T}, system, sampling_freq, prn
                 end
                 track_states = get_state.(track_results)
                 est_code_phase = mod.(get_code_phase.(track_results), get_code_length(system))
-                if counter > 1
+                if counter > 300
                     #push!(out, 10 * log10.(linear.(get_cn0.(track_results)) ./ 1u"Hz"))
                     track_data = TrackData.(
                         10 * log10.(linear.(get_cn0.(track_results)) ./ 1u"Hz"),
@@ -147,10 +147,9 @@ function plot_track_data(in::VectorSizedChannel; fig, sample_rate, num_samples_t
     end
 end
 
-#=
 function eval_missing_samples(;
-    frequency = 1565.42u"MHz",
-    sample_rate = 4e6u"Hz",
+    frequency = 1575.42u"MHz",
+    sample_rate = 3e6u"Hz",
     gnss_system = GPSL1()
 #    gain = 60u"dB",
 )
@@ -167,7 +166,7 @@ function eval_missing_samples(;
         ct.bandwidth = sample_rate
         ct.frequency = frequency
         ct.sample_rate = sample_rate
-        ct.gain = 20u"dB"
+        ct.gain = 30u"dB"
         ct.gain_mode = false
 
         # Setup receive parameters
