@@ -1,7 +1,7 @@
 #ENV["SOAPY_SDR_LOG_LEVEL"] = "DEBUG"
 
 using SoapySDR, Printf, Unitful, DSP, LibSigflow, SoapyBladeRF_jll, LibSigGUI, Statistics,
-    GNSSSignals, Tracking, Acquisition
+    GNSSSignals, Tracking, Acquisition, FFTW, LinearAlgebra
 include("./xtrx_debugging.jl")
 
 if Threads.nthreads() < 2
@@ -24,6 +24,51 @@ function update_code_phase(
     mod(code_frequency * num_samples / sampling_frequency + start_code_phase, code_length)
 end
 
+function correlate!(
+    correlation_result,
+    signal,
+    signal_baseband_freq_domain,
+    code_freq_baseband_freq_domain,
+    code_baseband,
+    fft_plan,
+    code_freq_domain,
+)
+    mul!(signal_baseband_freq_domain, fft_plan, signal)
+    code_freq_baseband_freq_domain .= code_freq_domain .* conj.(signal_baseband_freq_domain)
+    ldiv!(code_baseband, fft_plan, code_freq_baseband_freq_domain)
+    correlation_result .= abs2.(code_baseband)
+    correlation_result
+end
+
+function correlate_channel(in::MatrixSizedChannel{T}, system, sampling_freq, prn) where {T <: Number}
+    spawn_channel_thread(;T = Float64, in.num_antenna_channels) do out
+        code = gen_code(in.num_samples, system, prn, sampling_freq)
+        signal_baseband_freq_domain = Vector{ComplexF32}(undef, in.num_samples)
+        code_baseband = similar(signal_baseband_freq_domain)
+        correlation_result = Vector{Float32}(undef, in.num_samples)
+        code_freq_baseband_freq_domain = similar(signal_baseband_freq_domain)
+        fft_plan = plan_fft(signal_baseband_freq_domain)
+        code_freq_domain = fft_plan * code
+        consume_channel(in) do signals
+            signalsf32 = ComplexF32.(signals)
+            sample_shifts = map(eachcol(signalsf32)) do signal
+                correlation_result = correlate!(
+                    correlation_result,
+                    signal,
+                    signal_baseband_freq_domain,
+                    code_freq_baseband_freq_domain,
+                    code_baseband,
+                    fft_plan,
+                    code_freq_domain,
+                )
+                signal_noise_power, index = findmax(correlation_result)
+                index - 1
+            end
+            push!(out, sample_shifts)
+        end
+    end
+end
+
 function track_gnss_signal(in::MatrixSizedChannel{T}, system, sampling_freq, prn) where {T <: Number}
     spawn_channel_thread(;T = TrackData, in.num_antenna_channels) do out
         track_states = TrackingState[]
@@ -31,7 +76,7 @@ function track_gnss_signal(in::MatrixSizedChannel{T}, system, sampling_freq, prn
         counter = 0
         start_code_phases = zeros(in.num_antenna_channels)
         consume_channel(in) do signals
-            if length(track_states) != size(signals, 2) || !signal_found
+            if !signal_found
                 track_states = map(eachcol(signals)) do signal
                     acq_res = coarse_fine_acquire(
                         system,
@@ -55,7 +100,7 @@ function track_gnss_signal(in::MatrixSizedChannel{T}, system, sampling_freq, prn
                 end
                 track_states = get_state.(track_results)
                 est_code_phase = mod.(get_code_phase.(track_results), get_code_length(system))
-                if counter > 300
+                if counter > 1
                     #push!(out, 10 * log10.(linear.(get_cn0.(track_results)) ./ 1u"Hz"))
                     track_data = TrackData.(
                         10 * log10.(linear.(get_cn0.(track_results)) ./ 1u"Hz"),
@@ -100,9 +145,10 @@ function plot_track_data(in::VectorSizedChannel; fig, sample_rate, num_samples_t
     end
 end
 
+#=
 function eval_missing_samples(;
-    frequency = 1575.42u"MHz",
-    sample_rate = 3e6u"Hz",
+    frequency = 1565.42u"MHz",
+    sample_rate = 4e6u"Hz",
     gnss_system = GPSL1()
 #    gain = 60u"dB",
 )
@@ -119,7 +165,7 @@ function eval_missing_samples(;
         ct.bandwidth = sample_rate
         ct.frequency = frequency
         ct.sample_rate = sample_rate
-        ct.gain = 30u"dB"
+        ct.gain = 20u"dB"
         ct.gain_mode = false
 
         # Setup receive parameters
@@ -153,7 +199,7 @@ function eval_missing_samples(;
 #            if transmitted_samples > num_total_samples
                 return false
             end
-            signals[:, 1] = gen_code(num_samples, gnss_system, sat_prn, sample_rate, code_frequency, phase) .* fullscale / 3
+            signals[:, 1] = gen_code(num_samples, gnss_system, sat_prn, sample_rate, code_frequency, phase) .* fullscale ./ 3
             copyto!(buff, format.(round.(signals)))
             phase = update_code_phase(gnss_system, num_samples, code_frequency, sample_rate, phase)
             transmitted_samples += num_samples
@@ -180,6 +226,97 @@ function eval_missing_samples(;
         concat_cn0s = append_vectors(cn0_stream)
 
         plot_track_data(concat_cn0s; fig, sample_rate, num_samples_to_track)
+
+
+        # Ensure that we're done transmitting as well.
+        # This should always be the case, but best to be sure.
+        wait(t_tx)
+#        iq_data, signals
+    end
+end
+=#
+function eval_missing_samples1(;
+    frequency = 1565.42u"MHz",
+    sample_rate = 4e6u"Hz",
+    gnss_system = GPSL1()
+#    gain = 60u"dB",
+)
+    num_samples_to_track = Int(upreferred(sample_rate * 1u"ms"))
+
+    Device(first(Devices())) do dev
+
+        fig, close_stream_event = open_and_display_figure()
+        format = dev.rx[1].native_stream_format
+        fullscale = dev.tx[1].fullscale
+
+        # Setup transmitter parameters
+        ct = dev.tx[1]
+        ct.bandwidth = sample_rate
+        ct.frequency = frequency
+        ct.sample_rate = sample_rate
+        ct.gain = 20u"dB"
+        ct.gain_mode = false
+
+        # Setup receive parameters
+        for cr in dev.rx
+            cr.bandwidth = sample_rate
+            cr.frequency = frequency
+            cr.sample_rate = sample_rate
+            # Gain does not seem to have an effect with BladeRF
+            # Even if gain_mode is set to false
+            cr.gain = 0u"dB"
+            cr.gain_mode = false
+        end
+
+        sat_prn = 34
+        code_frequency = get_code_frequency(gnss_system)
+
+        stream_rx = SoapySDR.Stream(format, dev.rx)
+
+        stream_tx = SoapySDR.Stream(format, dev.tx)
+
+        num_samples = 2000#stream_tx.mtu * 10
+        signals = zeros(num_samples, stream_tx.nchannels)
+#        num_total_samples = Int(upreferred(sample_rate * 2000u"ms"))
+
+        # Construct streams
+        phase = 0.0
+        tx_go = Base.Event()
+        transmitted_samples = 0
+        c_tx = generate_stream(num_samples, stream_tx.nchannels; T=format) do buff
+            if close_stream_event.set
+#            if transmitted_samples > num_total_samples
+                return false
+            end
+            signals[:, 1] = gen_code(num_samples, gnss_system, sat_prn, sample_rate, code_frequency, phase) .* fullscale ./ 3
+            copyto!(buff, format.(round.(signals)))
+            phase = update_code_phase(gnss_system, num_samples, code_frequency, sample_rate, phase)
+            transmitted_samples += num_samples
+            return true
+        end
+        t_tx = stream_data(stream_tx, tripwire(c_tx, tx_go))
+
+        # RX reads the buffers in, and pushes them onto `iq_data`
+        samples_channel = flowgate(stream_data(stream_rx, close_stream_event; leadin_buffers=0), tx_go)
+#        samples_channel = flowgate(stream_data(stream_rx, num_total_samples; leadin_buffers=0), tx_go)
+
+#        iq_data = collect_buffers(samples_channel)
+
+        reshunked_channel = rechunk(samples_channel, num_samples_to_track)
+
+#        periodograms = calc_periodograms(reshunked_channel, sampling_freq = upreferred(sample_rate / 1u"Hz"))
+#        plot_periodograms(periodograms; fig)
+
+#        float_signal = complex2float(real, reshunked_channel)
+#        plot_signal(float_signal; fig)  
+
+        sample_shift_stream = correlate_channel(reshunked_channel, gnss_system, sample_rate, sat_prn)
+
+        concat_sample_shifts = append_vectors(sample_shift_stream)
+
+        diffed_samples_shifts = transform(concat_sample_shifts, xs -> map(x -> diff(x), xs))
+
+        plot_signal(diffed_samples_shifts; fig, ylabel = "Sample shifts")     
 
 
         # Ensure that we're done transmitting as well.

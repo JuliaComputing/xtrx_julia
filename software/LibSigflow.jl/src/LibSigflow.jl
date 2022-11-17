@@ -7,7 +7,7 @@ export generate_stream, stream_data, membuffer, tee, flowgate, tripwire, rechunk
        collect_psd, consume_channel, spawn_channel_thread, streaming_filter,
        write_to_file, stream_channel, calc_periodograms, self_downconvert,
        append_vectors, complex2float, MatrixSizedChannel, VectorSizedChannel,
-       AbstractSizedChannel
+       AbstractSizedChannel, transform
 
 include("sized_channel.jl")
 
@@ -79,6 +79,19 @@ function membuffer(in::MatrixSizedChannel{T}, max_size::Int = 16) where {T <: Nu
     end
 end
 
+"""
+    transform(in, func)
+
+Transform data
+"""
+function transform(in::AbstractSizedChannel{T}, func) where T
+    spawn_channel_thread(;T, num_samples = in isa MatrixSizedChannel ? in.num_samples : nothing, in.num_antenna_channels) do out
+        consume_channel(in) do buff
+            put!(out, func(buff))
+        end
+    end
+end
+
 
 """
     generate_stream(gen_buff!::Function, buff_size, num_channels)
@@ -145,9 +158,21 @@ function stream_data(s_rx::SoapySDR.Stream{T}, end_condition::Union{Integer,Base
         end
 
         flags = Ref{Int}(0)
-        read!(s_rx, split_matrix(buff); flags)
-        if flags[] & SoapySDR.SOAPY_SDR_OVERFLOW != 0
-            _num_overflows[] += 1
+        try
+            read!(s_rx, split_matrix(buff); flags, throw_error = true)
+        catch e
+            if e isa SoapySDR.SoapySDRDeviceError
+                if e.status == SoapySDR.SOAPY_SDR_OVERFLOW
+                    _num_overflows[] += 1
+                    println("Overflow")
+                elseif e.status == SoapySDR.SOAPY_SDR_TIMEOUT
+                    println("Tᵣ")
+                else
+                    println("Eᵣ")
+                end
+            else
+                rethrow(e)
+            end
         end
 
         buff_idx += 1
@@ -168,13 +193,23 @@ function stream_data(s_tx::SoapySDR.Stream{T}, in::MatrixSizedChannel{T}) where 
             # Consume channel and spit out into `s_tx`
             consume_channel(in) do buff
                 flags = Ref{Int}(0)
-                write(s_tx, split_matrix(buff); flags, timeout=0.1u"s")
-                if flags[] & SoapySDR.SOAPY_SDR_UNDERFLOW != 0
-                    _num_underflows[] += 1
+                try
+                    write(s_tx, split_matrix(buff); flags, timeout=0.9u"s", throw_error = true)
+                catch e
+                    if e isa SoapySDR.SoapySDRDeviceError
+                        if e.status == SoapySDR.SOAPY_SDR_UNDERFLOW
+                            _num_underflows[] += 1
+                            println("Underflow")
+                        elseif e.status == SoapySDR.SOAPY_SDR_TIMEOUT
+                            println("Tₜ")
+                        else
+                            println("Eₜ")
+                        end
+                    else
+                        rethrow(e)
+                    end
                 end
-                if flags[] & SoapySDR.SOAPY_SDR_TIMEOUT != 0
-                    println("T")
-                end
+#                println("Flags: ", bitstring(flags[]))
             end
 
             # We need to `sleep()` until we're done transmitting,
