@@ -189,8 +189,6 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
 
             _cachedFilterBws[SOAPY_SDR_RX][i] = 10e6;
             _cachedFilterBws[SOAPY_SDR_TX][i] = 10e6;
-            this->setIQBalance(SOAPY_SDR_RX, i, std::polar(1.0, 0.0));
-            this->setIQBalance(SOAPY_SDR_TX, i, std::polar(1.0, 0.0));
         }
     }
 
