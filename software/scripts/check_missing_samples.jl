@@ -169,3 +169,94 @@ function eval_missing_samples(;
         missing_samples_data, dma_buffers
     end
 end
+=#
+function eval_missing_samples1(;
+    frequency = 1565.42u"MHz",
+    sample_rate = 4e6u"Hz",
+    gnss_system = GPSL1()
+#    gain = 60u"dB",
+)
+    num_samples_to_track = Int(upreferred(sample_rate * 1u"ms"))
+
+    Device(first(Devices())) do dev
+
+        fig, close_stream_event = open_and_display_figure()
+        format = dev.rx[1].native_stream_format
+        fullscale = dev.tx[1].fullscale
+
+        # Setup transmitter parameters
+        ct = dev.tx[1]
+        ct.bandwidth = sample_rate
+        ct.frequency = frequency
+        ct.sample_rate = sample_rate
+        ct.gain = 20u"dB"
+        ct.gain_mode = false
+
+        # Setup receive parameters
+        for cr in dev.rx
+            cr.bandwidth = sample_rate
+            cr.frequency = frequency
+            cr.sample_rate = sample_rate
+            # Gain does not seem to have an effect with BladeRF
+            # Even if gain_mode is set to false
+            cr.gain = 0u"dB"
+            cr.gain_mode = false
+        end
+
+        sat_prn = 34
+        code_frequency = get_code_frequency(gnss_system)
+
+        stream_rx = SoapySDR.Stream(format, dev.rx)
+
+        stream_tx = SoapySDR.Stream(format, dev.tx)
+
+        num_samples = 2000#stream_tx.mtu * 10
+        signals = zeros(num_samples, stream_tx.nchannels)
+#        num_total_samples = Int(upreferred(sample_rate * 2000u"ms"))
+
+        # Construct streams
+        phase = 0.0
+        tx_go = Base.Event()
+        transmitted_samples = 0
+        c_tx = generate_stream(num_samples, stream_tx.nchannels; T=format) do buff
+            if close_stream_event.set
+#            if transmitted_samples > num_total_samples
+                return false
+            end
+            signals[:, 1] = gen_code(num_samples, gnss_system, sat_prn, sample_rate, code_frequency, phase) .* fullscale ./ 3
+            copyto!(buff, format.(round.(signals)))
+            phase = update_code_phase(gnss_system, num_samples, code_frequency, sample_rate, phase)
+            transmitted_samples += num_samples
+            return true
+        end
+        t_tx = stream_data(stream_tx, tripwire(c_tx, tx_go))
+
+        # RX reads the buffers in, and pushes them onto `iq_data`
+        samples_channel = flowgate(stream_data(stream_rx, close_stream_event; leadin_buffers=0), tx_go)
+#        samples_channel = flowgate(stream_data(stream_rx, num_total_samples; leadin_buffers=0), tx_go)
+
+#        iq_data = collect_buffers(samples_channel)
+
+        reshunked_channel = rechunk(samples_channel, num_samples_to_track)
+
+#        periodograms = calc_periodograms(reshunked_channel, sampling_freq = upreferred(sample_rate / 1u"Hz"))
+#        plot_periodograms(periodograms; fig)
+
+#        float_signal = complex2float(real, reshunked_channel)
+#        plot_signal(float_signal; fig)  
+
+        sample_shift_stream = correlate_channel(reshunked_channel, gnss_system, sample_rate, sat_prn)
+
+        concat_sample_shifts = append_vectors(sample_shift_stream)
+
+        diffed_samples_shifts = transform(concat_sample_shifts, xs -> map(x -> diff(x), xs))
+
+        plot_signal(diffed_samples_shifts; fig, ylabel = "Sample shifts")     
+
+
+        # Ensure that we're done transmitting as well.
+        # This should always be the case, but best to be sure.
+        wait(t_tx)
+#        iq_data, signals
+    end
+end

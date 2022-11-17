@@ -7,7 +7,7 @@ export generate_stream, stream_data, membuffer, tee, flowgate, tripwire, rechunk
        collect_psd, consume_channel, spawn_channel_thread, streaming_filter,
        write_to_file, stream_channel, calc_periodograms, self_downconvert,
        append_vectors, complex2float, MatrixSizedChannel, VectorSizedChannel,
-       AbstractSizedChannel
+       AbstractSizedChannel, transform
 
 include("sized_channel.jl")
 
@@ -75,6 +75,19 @@ function membuffer(in::MatrixSizedChannel{T}, max_size::Int = 16) where {T <: Nu
     spawn_channel_thread(;T, in.num_samples, in.num_antenna_channels, buffers_in_flight=max_size) do out
         consume_channel(in) do buff
             put!(out, buff)
+        end
+    end
+end
+
+"""
+    transform(in, func)
+
+Transform data
+"""
+function transform(in::AbstractSizedChannel{T}, func) where T
+    spawn_channel_thread(;T, num_samples = in isa MatrixSizedChannel ? in.num_samples : nothing, in.num_antenna_channels) do out
+        consume_channel(in) do buff
+            put!(out, func(buff))
         end
     end
 end
@@ -196,6 +209,7 @@ function stream_data(s_tx::SoapySDR.Stream{T}, in::MatrixSizedChannel{T}) where 
                         rethrow(e)
                     end
                 end
+#                println("Flags: ", bitstring(flags[]))
             end
 
             # We need to `sleep()` until we're done transmitting,
