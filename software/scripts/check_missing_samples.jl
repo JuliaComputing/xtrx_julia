@@ -1,6 +1,8 @@
 #ENV["SOAPY_SDR_LOG_LEVEL"] = "DEBUG"
 
-using SoapySDR, Printf, Unitful, DSP, LibSigflow, SoapyBladeRF_jll, LibSigGUI, Statistics,
+ENV["GKSwstype"] = "100"
+
+using SoapySDR, Printf, Unitful, DSP, LibSigflow, LibSigGUI, Statistics,
     GNSSSignals, Tracking, Acquisition, FFTW, LinearAlgebra
 include("./xtrx_debugging.jl")
 
@@ -41,7 +43,7 @@ function correlate!(
 end
 
 function correlate_channel(in::MatrixSizedChannel{T}, system, sampling_freq, prn) where {T <: Number}
-    spawn_channel_thread(;T = Float64, in.num_antenna_channels) do out
+    spawn_channel_thread(;T = Float64, num_samples = 1, num_antenna_channels = 1) do out
         code = gen_code(in.num_samples, system, prn, sampling_freq)
         signal_baseband_freq_domain = Vector{ComplexF32}(undef, in.num_samples)
         code_baseband = similar(signal_baseband_freq_domain)
@@ -50,11 +52,12 @@ function correlate_channel(in::MatrixSizedChannel{T}, system, sampling_freq, prn
         fft_plan = plan_fft(signal_baseband_freq_domain)
         code_freq_domain = fft_plan * code
         consume_channel(in) do signals
-            signalsf32 = ComplexF32.(signals)
-            sample_shifts = map(eachcol(signalsf32)) do signal
+#            signalsf32 = ComplexF32.(signals)
+#            sample_shifts = map(eachcol(signalsf32)) do signal
+
                 correlation_result = correlate!(
                     correlation_result,
-                    signal,
+                    ComplexF32.(signals[:,1]),
                     signal_baseband_freq_domain,
                     code_freq_baseband_freq_domain,
                     code_baseband,
@@ -62,9 +65,9 @@ function correlate_channel(in::MatrixSizedChannel{T}, system, sampling_freq, prn
                     code_freq_domain,
                 )
                 signal_noise_power, index = findmax(correlation_result)
-                index - 1
-            end
-            push!(out, sample_shifts)
+                sample_shifts = index - 1
+#            end
+            push!(out, reshape([sample_shifts], 1, 1))
         end
     end
 end
@@ -237,15 +240,16 @@ end
 =#
 function eval_missing_samples1(;
     frequency = 1565.42u"MHz",
-    sample_rate = 4e6u"Hz",
+    sample_rate = 5e6u"Hz",
+    rx_sample_rate = 2e6u"Hz",
     gnss_system = GPSL1()
 #    gain = 60u"dB",
 )
-    num_samples_to_track = Int(upreferred(sample_rate * 1u"ms"))
+    num_samples_to_track = Int(upreferred(rx_sample_rate * 1u"ms"))
 
     Device(first(Devices())) do dev
 
-        fig, close_stream_event = open_and_display_figure()
+#        fig, close_stream_event = open_and_display_figure(use_button = false)
         format = dev.rx[1].native_stream_format
         fullscale = dev.tx[1].fullscale
 
@@ -259,13 +263,15 @@ function eval_missing_samples1(;
 
         # Setup receive parameters
         for cr in dev.rx
-            cr.bandwidth = sample_rate
+            cr.bandwidth = rx_sample_rate
             cr.frequency = frequency
-            cr.sample_rate = sample_rate
+            cr.sample_rate = rx_sample_rate
             # Gain does not seem to have an effect with BladeRF
             # Even if gain_mode is set to false
             cr.gain = 0u"dB"
             cr.gain_mode = false
+            println("Rx bandwidth: ", cr.bandwidth)
+            println("Rx sample_rate: ", cr.sample_rate)
         end
 
         sat_prn = 34
@@ -275,17 +281,18 @@ function eval_missing_samples1(;
 
         stream_tx = SoapySDR.Stream(format, dev.tx)
 
-        num_samples = 2000#stream_tx.mtu * 10
+        num_samples = stream_tx.mtu
         signals = zeros(num_samples, stream_tx.nchannels)
-#        num_total_samples = Int(upreferred(sample_rate * 2000u"ms"))
+        num_total_samples = Int(upreferred(sample_rate * 20000u"ms"))
+        rx_num_total_samples = Int(upreferred(rx_sample_rate * 20000u"ms"))
 
         # Construct streams
         phase = 0.0
         tx_go = Base.Event()
         transmitted_samples = 0
         c_tx = generate_stream(num_samples, stream_tx.nchannels; T=format) do buff
-            if close_stream_event.set
-#            if transmitted_samples > num_total_samples
+#            if close_stream_event.set
+            if transmitted_samples > num_total_samples
                 return false
             end
             signals[:, 1] = gen_code(num_samples, gnss_system, sat_prn, sample_rate, code_frequency, phase) .* fullscale ./ 3
@@ -297,31 +304,27 @@ function eval_missing_samples1(;
         t_tx = stream_data(stream_tx, tripwire(c_tx, tx_go))
 
         # RX reads the buffers in, and pushes them onto `iq_data`
-        samples_channel = flowgate(stream_data(stream_rx, close_stream_event; leadin_buffers=0), tx_go)
-#        samples_channel = flowgate(stream_data(stream_rx, num_total_samples; leadin_buffers=0), tx_go)
+#        samples_channel = flowgate(stream_data(stream_rx, close_stream_event; leadin_buffers=0), tx_go)
+        samples_channel = flowgate(stream_data(stream_rx, rx_num_total_samples; leadin_buffers=0), tx_go)
 
 #        iq_data = collect_buffers(samples_channel)
 
         reshunked_channel = rechunk(samples_channel, num_samples_to_track)
 
-#        periodograms = calc_periodograms(reshunked_channel, sampling_freq = upreferred(sample_rate / 1u"Hz"))
+#        periodograms = calc_periodograms(reshunked_channel, sampling_freq = upreferred(rx_sample_rate / 1u"Hz"))
 #        plot_periodograms(periodograms; fig)
 
 #        float_signal = complex2float(real, reshunked_channel)
 #        plot_signal(float_signal; fig)  
 
-        sample_shift_stream = correlate_channel(reshunked_channel, gnss_system, sample_rate, sat_prn)
+        sample_shift_stream = correlate_channel(reshunked_channel, gnss_system, rx_sample_rate, sat_prn)
 
-        concat_sample_shifts = append_vectors(sample_shift_stream)
-
-        diffed_samples_shifts = transform(concat_sample_shifts, xs -> map(x -> diff(x), xs))
-
-        plot_signal(diffed_samples_shifts; fig, ylabel = "Sample shifts")     
-
+#        plot_signal(diffed_samples_shifts; fig, ylabel = "Sample shifts")     
+        iq_data = collect_buffers(sample_shift_stream)
 
         # Ensure that we're done transmitting as well.
         # This should always be the case, but best to be sure.
         wait(t_tx)
-#        iq_data, signals
+        iq_data
     end
 end
