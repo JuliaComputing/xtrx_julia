@@ -43,11 +43,7 @@ function correlate!(
 end
 
 function correlate_channel(in::MatrixSizedChannel{T}, system, sampling_freq, prn) where {T <: Number}
-<<<<<<< HEAD
     spawn_channel_thread(;T = Float64, num_samples = 1, in.num_antenna_channels) do out
-=======
-    spawn_channel_thread(;T = Float64, num_samples = 1, num_antenna_channels = 1) do out
->>>>>>> ae82b3e (Reduce load)
         code = gen_code(in.num_samples, system, prn, sampling_freq)
         signal_baseband_freq_domain = Vector{ComplexF32}(undef, in.num_samples)
         code_baseband = similar(signal_baseband_freq_domain)
@@ -56,12 +52,11 @@ function correlate_channel(in::MatrixSizedChannel{T}, system, sampling_freq, prn
         fft_plan = plan_fft(signal_baseband_freq_domain)
         code_freq_domain = fft_plan * code
         consume_channel(in) do signals
-#            signalsf32 = ComplexF32.(signals)
-#            sample_shifts = map(eachcol(signalsf32)) do signal
-
+            signalsf32 = ComplexF32.(signals)
+            sample_shifts = map(eachcol(signalsf32)) do signal
                 correlation_result = correlate!(
                     correlation_result,
-                    ComplexF32.(signals[:,1]),
+                    signal,
                     signal_baseband_freq_domain,
                     code_freq_baseband_freq_domain,
                     code_baseband,
@@ -69,15 +64,9 @@ function correlate_channel(in::MatrixSizedChannel{T}, system, sampling_freq, prn
                     code_freq_domain,
                 )
                 signal_noise_power, index = findmax(correlation_result)
-<<<<<<< HEAD
                 index - 1
             end
             push!(out, reshape(sample_shifts, 1, in.num_antenna_channels))
-=======
-                sample_shifts = index - 1
-#            end
-            push!(out, reshape([sample_shifts], 1, 1))
->>>>>>> ae82b3e (Reduce load)
         end
     end
 end
@@ -251,14 +240,10 @@ end
 function eval_missing_samples1(;
     frequency = 1565.42u"MHz",
     sample_rate = 5e6u"Hz",
-<<<<<<< HEAD
-=======
-    rx_sample_rate = 2e6u"Hz",
->>>>>>> ae82b3e (Reduce load)
     gnss_system = GPSL1()
 #    gain = 60u"dB",
 )
-    num_samples_to_track = Int(upreferred(rx_sample_rate * 1u"ms"))
+    num_samples_to_track = Int(upreferred(sample_rate * 1u"ms"))
 
     Device(first(Devices())) do dev
 
@@ -276,15 +261,13 @@ function eval_missing_samples1(;
 
         # Setup receive parameters
         for cr in dev.rx
-            cr.bandwidth = rx_sample_rate
+            cr.bandwidth = sample_rate
             cr.frequency = frequency
-            cr.sample_rate = rx_sample_rate
+            cr.sample_rate = sample_rate
             # Gain does not seem to have an effect with BladeRF
             # Even if gain_mode is set to false
             cr.gain = 0u"dB"
             cr.gain_mode = false
-            println("Rx bandwidth: ", cr.bandwidth)
-            println("Rx sample_rate: ", cr.sample_rate)
         end
 
         sat_prn = 34
@@ -297,10 +280,6 @@ function eval_missing_samples1(;
         num_samples = stream_tx.mtu
         signals = zeros(num_samples, stream_tx.nchannels)
         num_total_samples = Int(upreferred(sample_rate * 20000u"ms"))
-<<<<<<< HEAD
-=======
-        rx_num_total_samples = Int(upreferred(rx_sample_rate * 20000u"ms"))
->>>>>>> ae82b3e (Reduce load)
 
         # Construct streams
         phase = 0.0
@@ -321,23 +300,16 @@ function eval_missing_samples1(;
 
         # RX reads the buffers in, and pushes them onto `iq_data`
 #        samples_channel = flowgate(stream_data(stream_rx, close_stream_event; leadin_buffers=0), tx_go)
-<<<<<<< HEAD
         samples_channel = flowgate(stream_data(stream_rx, num_total_samples; leadin_buffers=0), tx_go)
-=======
-        samples_channel = flowgate(stream_data(stream_rx, rx_num_total_samples; leadin_buffers=0), tx_go)
-
-#        iq_data = collect_buffers(samples_channel)
->>>>>>> ae82b3e (Reduce load)
 
         reshunked_channel = rechunk(samples_channel, num_samples_to_track)
 
-#        periodograms = calc_periodograms(reshunked_channel, sampling_freq = upreferred(rx_sample_rate / 1u"Hz"))
+#        periodograms = calc_periodograms(reshunked_channel, sampling_freq = upreferred(sample_rate / 1u"Hz"))
 #        plot_periodograms(periodograms; fig)
 
 #        float_signal = complex2float(real, reshunked_channel)
 #        plot_signal(float_signal; fig)  
 
-<<<<<<< HEAD
         sample_shift_stream = correlate_channel(reshunked_channel, gnss_system, sample_rate, sat_prn)
 
 #        plot_signal(diffed_samples_shifts; fig, ylabel = "Sample shifts")     
@@ -427,9 +399,6 @@ function eval_missing_samples_to_file(;
         samples_channel = flowgate(stream_data(stream_rx, num_total_samples; leadin_buffers=0), tx_go)
 
         write_to_file(samples_channel, "/home/schoenbrod/Messungen/data")
-=======
-        sample_shift_stream = correlate_channel(reshunked_channel, gnss_system, rx_sample_rate, sat_prn)
->>>>>>> ae82b3e (Reduce load)
 
 #        plot_signal(diffed_samples_shifts; fig, ylabel = "Sample shifts")     
         iq_data = collect_buffers(sample_shift_stream)
@@ -437,10 +406,6 @@ function eval_missing_samples_to_file(;
         # Ensure that we're done transmitting as well.
         # This should always be the case, but best to be sure.
         wait(t_tx)
-<<<<<<< HEAD
         dma_buffers
-=======
-        iq_data
->>>>>>> ae82b3e (Reduce load)
     end
 end
