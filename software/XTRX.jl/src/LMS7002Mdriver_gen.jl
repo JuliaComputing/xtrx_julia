@@ -1314,6 +1314,26 @@ function LMS7002M_txtsp_set_iq_correction(self, channel, phase, gain)
 end
 
 """
+    LMS7002M_txtsp_get_iq_correction(self, channel, phase, gain)
+
+IQ imbalance correction value for Tx TSP chain.
+
+- The gain is the ratio of I/Q, and should be near 1.0
+- Gain values greater than 1.0 max out I and reduce Q.
+- Gain values less than 1.0 max out Q and reduce I.
+- A gain value of 1.0 bypasses the magnitude correction.
+- A phase value of 0.0 bypasses the phase correction.
+
+\\param self an instance of the LMS7002M driver
+\\param channel the channel LMS_CHA or LMS_CHB
+\\param phase the phase correction (radians)
+\\param gain the magnitude correction (I/Q ratio)
+"""
+function LMS7002M_txtsp_get_iq_correction(self, channel, phase, gain)
+    ccall((:LMS7002M_txtsp_get_iq_correction, libSoapyXTRX), Cvoid, (Ptr{LMS7002M_t}, LMS7002M_chan_t, Ptr{Cdouble}, Ptr{Cdouble}), self, channel, phase, gain)
+end
+
+"""
     LMS7002M_tbb_enable(self, channel, enable)
 
 Enable/disable the TX baseband.
@@ -1664,6 +1684,26 @@ IQ imbalance correction value for Rx TSP chain.
 """
 function LMS7002M_rxtsp_set_iq_correction(self, channel, phase, gain)
     ccall((:LMS7002M_rxtsp_set_iq_correction, libSoapyXTRX), Cvoid, (Ptr{LMS7002M_t}, LMS7002M_chan_t, Cdouble, Cdouble), self, channel, phase, gain)
+end
+
+"""
+    LMS7002M_rxtsp_get_iq_correction(self, channel, phase, gain)
+
+IQ imbalance correction value for Rx TSP chain.
+
+- The gain is the ratio of I/Q, and should be near 1.0
+- Gain values greater than 1.0 max out I and reduce Q.
+- Gain values less than 1.0 max out Q and reduce I.
+- A gain value of 1.0 bypasses the magnitude correction.
+- A phase value of 0.0 bypasses the phase correction.
+
+\\param self an instance of the LMS7002M driver
+\\param channel the channel LMS_CHA or LMS_CHB
+\\param phase the phase correction (radians)
+\\param gain the magnitude correction (I/Q ratio)
+"""
+function LMS7002M_rxtsp_get_iq_correction(self, channel, phase, gain)
+    ccall((:LMS7002M_rxtsp_get_iq_correction, libSoapyXTRX), Cvoid, (Ptr{LMS7002M_t}, LMS7002M_chan_t, Ptr{Cdouble}, Ptr{Cdouble}), self, channel, phase, gain)
 end
 
 """
