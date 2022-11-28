@@ -1,5 +1,4 @@
 [deps]
-BladeRFHardwareDriver_jll = "ddcda2f0-0770-5eff-b02e-03a583a735ee"
 CEnum = "fa961155-64e5-5f13-b03f-caf6b980ea82"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
