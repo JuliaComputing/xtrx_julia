@@ -29,6 +29,14 @@
 #include <fstream>
 #include <string>
 #include <sys/mman.h>
+#include <lime/LMS7002M.h>
+#include <lime/ConnectionHandle.h>
+#include <lime/lms7_device.h>
+#include <lime/LMS7002M_parameters.h>
+
+using namespace lime;
+
+#define dirName ((direction == SOAPY_SDR_RX)?"Rx":"Tx")
 
 void customLogHandler(const LMS7_log_level_t level, const char *message) {
     switch (level) {
@@ -41,6 +49,21 @@ void customLogHandler(const LMS7_log_level_t level, const char *message) {
     case LMS7_DEBUG:    SoapySDR::log(SOAPY_SDR_DEBUG, message);    break;
     case LMS7_TRACE:    SoapySDR::log(SOAPY_SDR_TRACE, message);    break;
     }
+}
+
+static ConnectionHandle argsToHandle(const SoapySDR::Kwargs &args)
+{
+    ConnectionHandle handle;
+
+    //load handle with key/value provided options
+    if (args.count("module") != 0) handle.module = args.at("module");
+    if (args.count("media") != 0) handle.media = args.at("media");
+    if (args.count("name") != 0) handle.name = args.at("name");
+    if (args.count("addr") != 0) handle.addr = args.at("addr");
+    if (args.count("serial") != 0) handle.serial = args.at("serial");
+    if (args.count("index") != 0) handle.index = std::stoi(args.at("index"));
+
+    return handle;
 }
 
 // Forward declaration for usage in constructor.
@@ -71,8 +94,9 @@ void dma_set_loopback(int fd, bool loopback_enable) {
     checked_ioctl(fd, LITEPCIE_IOCTL_DMA, &m);
 }
 
-SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
-    : _fd(-1), _lms(NULL), _masterClockRate(80.0e6), _refClockRate(26e6) {
+SoapyXTRX::SoapyXTRX(const ConnectionHandle &handle, const SoapySDR::Kwargs &args)
+    : _rxDCOffsetMode({true, true}), _rxDCOffsetWindow({0, 0}), _fd(-1),
+      _lms(NULL), _masterClockRate(80.0e6), _refClockRate(26e6), oversampling(0) {
     LMS7_set_log_handler(&customLogHandler);
     LMS7_set_log_level(LMS7_TRACE);
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyXTRX initializing...");
@@ -123,19 +147,9 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
     writeSetting("FPGA_RX_DELAY", "16");
     writeSetting("FPGA_TX_DELAY", "16");
 
-    // setup LMS7002M
-    _lms = LMS7002M_create(litepcie_interface_transact, &_fd);
-    if (_lms == NULL)
-        throw std::runtime_error(
-            "SoapyXTRX(): failed to LMS7002M_create()");
-    LMS7002M_reset(_lms);
-    LMS7002M_set_spi_mode(_lms, 4);
-
-    // read info register
-    LMS7002M_regs_spi_read(_lms, 0x002f);
-    SoapySDR::logf(SOAPY_SDR_INFO, "LMS7002M info: revision %d, version %d",
-                   LMS7002M_regs(_lms)->reg_0x002f_rev,
-                   LMS7002M_regs(_lms)->reg_0x002f_ver);
+    lms7Device = LMS7_Device::CreateDevice(handle);
+    if (lms7Device == nullptr) throw std::runtime_error(
+        "Failed to make connection with '" + handle.serialize() + "'");
 
     // set clock to Reference Clock Source
     if (args.count("clock") == 0) {
@@ -144,6 +158,65 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
         std::string clock = args.at("clock");
         this->setClockSource(clock);
     }
+
+    SoapySDR::logf(SOAPY_SDR_INFO, "LMS7002M info: revision %d, version %d",
+        lms7Device->ReadParam(LMS7_REV),
+        lms7Device->ReadParam(LMS7_VER)
+    );
+
+    const auto devInfo = lms7Device->GetInfo();
+    //quick summary
+    SoapySDR::logf(SOAPY_SDR_INFO, "Device name: %s", devInfo->deviceName);
+    SoapySDR::logf(SOAPY_SDR_INFO, "Reference: %g MHz", lms7Device->GetClockFreq(LMS_CLOCK_REF)/1e6);
+
+
+    lms7Device->Init();
+
+
+    //enable all channels
+    for (size_t channel = 0; channel < lms7Device->GetNumChannels(); channel++)
+    {
+        lms7Device->EnableChannel(true, channel, true);
+        lms7Device->EnableChannel(false, channel, true);
+    }
+
+    //disable use of value cache automatically
+    //or specify args[enableCache] == 1 to enable
+    bool cacheEnable = false;
+    if (args.count("cacheCalibrations"))
+    {
+        SoapySDR::logf(SOAPY_SDR_INFO, "'cacheCalibrations' setting is deprecated use 'enableCache' instead", devInfo->deviceName);
+        if (std::stoi(args.at("cacheCalibrations")))
+            cacheEnable = true;
+    }
+    else
+        cacheEnable = args.count("enableCache") && std::stoi(args.at("enableCache"))!= 0;
+
+    SoapySDR::logf(SOAPY_SDR_INFO, "LMS7002M register cache: %s", cacheEnable?"Enabled":"Disabled");
+    lms7Device->EnableCache(cacheEnable);
+
+    //give all RFICs a default state
+    for (size_t channel = 0; channel < lms7Device->GetNumChannels(); channel++)
+    {
+        this->setGain(SOAPY_SDR_RX, channel, 32);
+        this->setGain(SOAPY_SDR_TX, channel, 0);
+    }
+    mChannels[SOAPY_SDR_RX].resize(lms7Device->GetNumChannels());
+    mChannels[SOAPY_SDR_TX].resize(lms7Device->GetNumChannels());
+    _channelsToCal.clear();
+    activeStreams.clear();
+
+    // setup LMS7002M
+    _lms = LMS7002M_create(litepcie_interface_transact, &_fd);
+/*
+    LMS7002M_reset(_lms);
+    LMS7002M_set_spi_mode(_lms, 4);
+
+    // read info register
+    LMS7002M_regs_spi_read(_lms, 0x002f);
+    SoapySDR::logf(SOAPY_SDR_INFO, "LMS7002M info: revision %d, version %d",
+                   LMS7002M_regs(_lms)->reg_0x002f_rev,
+                   LMS7002M_regs(_lms)->reg_0x002f_ver);
 
     // configure data port directions and data clock rates
     LMS7002M_configure_lml_port(_lms, LMS_PORT2, LMS_TX, 1);
@@ -172,9 +245,6 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
     // XTRX-specific configuration
     LMS7002M_ldo_enable(_lms, true, LMS7002M_LDO_ALL);
     LMS7002M_xbuf_share_tx(_lms, true);
-
-    // turn the clocks on (tested frequencies: 61.44MHz, 80MHz, 122.88MHz)
-    this->setMasterClockRate(80.0e6);
 
     // some defaults to avoid throwing
     _cachedSampleRates[SOAPY_SDR_RX] = 1e6;
@@ -207,6 +277,14 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
         this->setIQBalance(SOAPY_SDR_RX, i, std::polar(1.0, 0.0));
         this->setIQBalance(SOAPY_SDR_TX, i, std::polar(1.0, 0.0));
     }
+*/
+
+//    if (_lms == NULL)
+//        throw std::runtime_error(
+//            "SoapyXTRX(): failed to LMS7002M_create()");
+
+    // turn the clocks on (tested frequencies: 61.44MHz, 80MHz, 122.88MHz)
+//    this->setMasterClockRate(80.0e6);
 
     // set-up the DMA
     checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &_dma_mmap_info);
@@ -274,24 +352,13 @@ SoapyXTRX::~SoapyXTRX(void) {
                                    _dma_mmap_info.dma_tx_buf_count);
         _tx_stream.opened = false;
     }
-    // power down and clean up
-    // NOTE: disable if you want to inspect the configuration (e.g. in LimeGUI)
-    //       or to validate the settings (e.g. using xtrx_litepcie_test)
-    LMS7002M_afe_enable(_lms, LMS_TX, LMS_CHA, false);
-    LMS7002M_afe_enable(_lms, LMS_TX, LMS_CHB, false);
-    LMS7002M_afe_enable(_lms, LMS_RX, LMS_CHA, false);
-    LMS7002M_afe_enable(_lms, LMS_RX, LMS_CHB, false);
-    LMS7002M_rxtsp_enable(_lms, LMS_CHAB, false);
-    LMS7002M_txtsp_enable(_lms, LMS_CHAB, false);
-    LMS7002M_rbb_enable(_lms, LMS_CHAB, false);
-    LMS7002M_tbb_enable(_lms, LMS_CHAB, false);
-    LMS7002M_rfe_enable(_lms, LMS_CHAB, false);
-    LMS7002M_trf_enable(_lms, LMS_CHAB, false);
-    LMS7002M_sxx_enable(_lms, LMS_RX, false);
-    LMS7002M_sxx_enable(_lms, LMS_TX, false);
-    LMS7002M_xbuf_share_tx(_lms, false);
-    LMS7002M_ldo_enable(_lms, false, LMS7002M_LDO_ALL);
-    LMS7002M_power_down(_lms);
+    for (size_t channel = 0; channel < lms7Device->GetNumChannels(); channel++)
+    {
+        lms7Device->EnableChannel(true, channel, false);
+        lms7Device->EnableChannel(false, channel, false);
+    }
+    delete lms7Device;
+
     LMS7002M_destroy(_lms);
     close(_fd);
 }
@@ -318,75 +385,63 @@ SoapySDR::Kwargs SoapyXTRX::getHardwareInfo(void) const {
  * Antenna API
  ******************************************************************/
 
-std::vector<std::string> SoapyXTRX::listAntennas(const int direction,
-                                                 const size_t) const {
-    std::vector<std::string> ants;
-    if (direction == SOAPY_SDR_RX) {
-        ants.push_back("LNAH");
-        ants.push_back("LNAL");
-        ants.push_back("LNAW");
-        ants.push_back("LB1");
-        ants.push_back("LB2");
-    }
-    if (direction == SOAPY_SDR_TX) {
-        ants.push_back("BAND1");
-        ants.push_back("BAND2");
-    }
-    return ants;
+std::vector<std::string> SoapyXTRX::listAntennas(const int direction, const size_t /*channel*/) const
+{
+    return lms7Device->GetPathNames(direction == SOAPY_SDR_TX);
 }
 
 void SoapyXTRX::setAntenna(const int direction, const size_t channel,
                            const std::string &name) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
 
-    int rx_rf_switch = 0;
-    if (direction == SOAPY_SDR_RX) {
-        int path = LMS7002M_RFE_NONE;
-        if (name == "LNAH") {
-            path = LMS7002M_RFE_LNAH;
-            rx_rf_switch = 2;
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyLMS7::setAntenna(%s, %d, %s)", dirName, int(channel), name.c_str());
+
+    bool tx = direction == SOAPY_SDR_TX;
+    std::vector<std::string> nameList = lms7Device->GetPathNames(tx);
+    for (unsigned path = 0; path < nameList.size(); path++)
+        if (nameList[path] == name)
+        {
+            lms7Device->SetPath(tx, channel, path);
+            _channelsToCal.emplace(direction, channel);
+            if (tx) {
+                int tx_rf_switch = 0;
+                if (name == "BAND1") {
+                    tx_rf_switch = 1;
+                }
+                else if (name == "BAND2") {
+                    tx_rf_switch = 0;
+                }
+                litepcie_writel(_fd, CSR_RF_SWITCHES_TX_ADDR, tx_rf_switch);
+            }
+            else {
+                int rx_rf_switch = 0;
+                if (name == "LNAH") {
+                    rx_rf_switch = 2;
+                }
+                else if (name == "LNAL") {
+                    rx_rf_switch = 1;
+                }
+                else if (name == "LNAW") {
+                    rx_rf_switch = 0;
+                }
+                litepcie_writel(_fd, CSR_RF_SWITCHES_RX_ADDR, rx_rf_switch);
+            }
+            return;
         }
-        else if (name == "LNAL") {
-            path = LMS7002M_RFE_LNAL;
-            rx_rf_switch = 1;
-        }
-        else if (name == "LNAW") {
-            path = LMS7002M_RFE_LNAW;
-            rx_rf_switch = 0;
-        }
-        else if (name == "LB1")
-            path = LMS7002M_RFE_LB1;
-        else if (name == "LB2")
-            path = LMS7002M_RFE_LB2;
-        else
-            throw std::runtime_error("SoapyXTRX::setAntenna(RX, " + name +
-                                     ") - unknown antenna name");
-        LMS7002M_rfe_set_path(_lms, ch2LMS(channel), path);
-        litepcie_writel(_fd, CSR_RF_SWITCHES_RX_ADDR, rx_rf_switch);
-    }
-    if (direction == SOAPY_SDR_TX) {
-        int tx_rf_switch = 0;
-        int band = 0;
-        if (name == "BAND1") {
-            band = 1;
-            tx_rf_switch = 1;
-        }
-        else if (name == "BAND2") {
-            band = 2;
-            tx_rf_switch = 0;
-        }
-        else
-            throw std::runtime_error("SoapyXTRX::setAntenna(TX, " + name +
-                                     ") - unknown antenna name");
-        LMS7002M_trf_select_band(_lms, ch2LMS(channel), band);
-        litepcie_writel(_fd, CSR_RF_SWITCHES_TX_ADDR, tx_rf_switch);
-    }
-    _cachedAntValues[direction][channel] = name;
+
+    throw std::runtime_error("SoapyLMS7::setAntenna(TX, "+name+") - unknown antenna name");
 }
 
-std::string SoapyXTRX::getAntenna(const int direction,
-                                  const size_t channel) const {
-    return _cachedAntValues.at(direction).at(channel);
+std::string SoapyXTRX::getAntenna(const int direction, const size_t channel) const
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    bool tx = direction == SOAPY_SDR_TX;
+    int path = lms7Device->GetPath(tx,channel);
+    if (path < 0)
+        return "";
+
+    std::vector<std::string> nameList = lms7Device->GetPathNames(tx);
+    return (unsigned)path < nameList.size() ? nameList[path] : "";
 }
 
 
@@ -394,87 +449,77 @@ std::string SoapyXTRX::getAntenna(const int direction,
  * Frontend corrections API
  ******************************************************************/
 
-bool SoapyXTRX::hasDCOffsetMode(const int direction,
-                                const size_t /*channel*/) const {
-    if (direction == SOAPY_SDR_RX) {
-        return true;
-    } else {
-        return false;
-    }
+bool SoapyXTRX::hasDCOffsetMode(const int direction, const size_t /*channel*/) const
+{
+    return (direction == SOAPY_SDR_RX);
 }
 
-void SoapyXTRX::setDCOffsetMode(const int direction, const size_t channel,
-                                const bool automatic) {
-    std::lock_guard<std::mutex> lock(_mutex);
-
-    if (direction == SOAPY_SDR_RX) {
-        LMS7002M_rxtsp_set_dc_correction(_lms, ch2LMS(channel), automatic);
-    } else {
-        SoapySDR::Device::setDCOffsetMode(direction, channel, automatic);
-    }
+void SoapyXTRX::setDCOffsetMode(const int direction, const size_t channel, const bool automatic)
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    if (direction == SOAPY_SDR_RX)
+        lms7Device->WriteParam(LMS7param(DC_BYP_RXTSP),automatic == 0, channel);
 }
 
-bool SoapyXTRX::getDCOffsetMode(const int direction,
-                                const size_t channel) const {
-    if (direction == SOAPY_SDR_RX) {
-        return LMS7002M_rxtsp_get_dc_correction(_lms, ch2LMS(channel));
-    } else {
-        return SoapySDR::Device::getDCOffsetMode(direction, channel);
-    }
+bool SoapyXTRX::getDCOffsetMode(const int direction, const size_t channel) const
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    if (direction == SOAPY_SDR_RX)
+        return lms7Device->ReadParam(LMS7param(DC_BYP_RXTSP),channel) == 0;
+    return false;
 }
 
-bool SoapyXTRX::hasDCOffset(const int direction,
-                            const size_t /*channel*/) const {
-
-    if (direction == SOAPY_SDR_TX) {
-        return true;
-    } else {
-        return false;
-    }
+bool SoapyXTRX::hasDCOffset(const int /*direction*/, const size_t /*channel*/) const
+{
+    return true;
 }
 
-void SoapyXTRX::setDCOffset(const int direction, const size_t channel,
-                            const std::complex<double> &offset) {
-    std::lock_guard<std::mutex> lock(_mutex);
-
-    if (direction == SOAPY_SDR_TX) {
-        LMS7002M_txtsp_set_dc_correction(_lms, ch2LMS(channel), offset.real(),
-                                         offset.imag());
-    } else {
-        SoapySDR::Device::setDCOffset(direction, channel, offset);
-    }
+void SoapyXTRX::setDCOffset(const int direction, const size_t channel, const std::complex<double> &offset)
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    const auto lmsDir = (direction == SOAPY_SDR_TX)?LMS7002M::Tx:LMS7002M::Rx;
+    auto rfic = lms7Device->GetLMS(channel/2);
+    rfic->Modify_SPI_Reg_bits(LMS7param(MAC),(channel%2)+1);
+    rfic->SetDCOffset(lmsDir, offset.real(), offset.imag());
 }
 
-std::complex<double> SoapyXTRX::getDCOffset(const int direction,
-                                            const size_t channel) const {
-    if (direction == SOAPY_SDR_TX) {
-        double i;
-        double q;
-        LMS7002M_txtsp_get_dc_correction(_lms, ch2LMS(channel),
-                                            &i, &q);
-        return std::complex<double>(i, q);
-    } else {
-        return SoapySDR::Device::getDCOffset(direction, channel);
-    }
+std::complex<double> SoapyXTRX::getDCOffset(const int direction, const size_t channel) const
+{
+    double I = 0.0, Q = 0.0;
+    const auto lmsDir = (direction == SOAPY_SDR_TX)?LMS7002M::Tx:LMS7002M::Rx;
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    auto rfic = lms7Device->GetLMS(channel/2);
+    rfic->Modify_SPI_Reg_bits(LMS7param(MAC),(channel%2)+1);
+    rfic->GetDCOffset(lmsDir, I, Q);
+    return std::complex<double>(I, Q);
 }
 
-void SoapyXTRX::setIQBalance(const int direction, const size_t channel,
-                             const std::complex<double> &balance) {
-    std::lock_guard<std::mutex> lock(_mutex);
-
-    if (direction == SOAPY_SDR_TX) {
-        LMS7002M_txtsp_set_iq_correction(_lms, ch2LMS(channel),
-                                         std::arg(balance), std::abs(balance));
-    } else {
-        LMS7002M_rxtsp_set_iq_correction(_lms, ch2LMS(channel),
-                                         std::arg(balance), std::abs(balance));
-    }
-    _cachedIqBalValues[direction][channel] = balance;
+bool SoapyXTRX::hasIQBalance(const int /*direction*/, const size_t /*channel*/) const
+{
+    return true;
 }
 
-std::complex<double> SoapyXTRX::getIQBalance(const int direction,
-                                             const size_t channel) const {
-    return _cachedIqBalValues.at(direction).at(channel);
+void SoapyXTRX::setIQBalance(const int direction, const size_t channel, const std::complex<double> &balance)
+{
+    const auto lmsDir = (direction == SOAPY_SDR_TX)?LMS7002M::Tx:LMS7002M::Rx;
+    double gain = std::abs(balance);
+    double gainI = 1.0; if (gain < 1.0) gainI = gain/1.0;
+    double gainQ = 1.0; if (gain > 1.0) gainQ = 1.0/gain;
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    auto rfic = lms7Device->GetLMS(channel/2);
+    rfic->Modify_SPI_Reg_bits(LMS7param(MAC),(channel%2)+1);
+    rfic->SetIQBalance(lmsDir, std::arg(balance), gainI, gainQ);
+}
+
+std::complex<double> SoapyXTRX::getIQBalance(const int direction, const size_t channel) const
+{
+    const auto lmsDir = (direction == SOAPY_SDR_TX)?LMS7002M::Tx:LMS7002M::Rx;
+    double phase, gainI, gainQ;
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    auto rfic = lms7Device->GetLMS(channel/2);
+    rfic->Modify_SPI_Reg_bits(LMS7param(MAC),(channel%2)+1);
+    rfic->GetIQBalance(lmsDir, phase, gainI, gainQ);
+    return (gainI/gainQ)*std::polar(1.0, phase);
 }
 
 
@@ -482,159 +527,63 @@ std::complex<double> SoapyXTRX::getIQBalance(const int direction,
  * Gain API
  ******************************************************************/
 
-std::vector<std::string> SoapyXTRX::listGains(const int direction,
-                                              const size_t) const {
+std::vector<std::string> SoapyXTRX::listGains(const int direction, const size_t /*channel*/) const
+{
     std::vector<std::string> gains;
-    if (direction == SOAPY_SDR_RX) {
-        gains.push_back("LNA");
+    if (direction == SOAPY_SDR_RX)
+    {
         gains.push_back("TIA");
+        gains.push_back("LNA");
         gains.push_back("PGA");
     }
-    if (direction == SOAPY_SDR_TX) {
+    if (direction == SOAPY_SDR_TX)
+    {
         gains.push_back("PAD");
+        gains.push_back("IAMP");
     }
     return gains;
 }
 
-void SoapyXTRX::setGain(const int direction, const size_t channel, const double value) {
-
-    SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyXTRX::setGain(%s, ch%d, %f dB)",
-                   dir2Str(direction), channel, value);
-
-    if (direction == SOAPY_SDR_TX)
-    {
-        // Setting the TX gain using a single value optimized for the LMS7002
-        // hasn't been implemented yet.
-        // Let's default to the standard SoapySDR version.
-        SoapySDR::Device::setGain(direction, channel, value);
-    }
-    else
-    {
-        std::lock_guard<std::mutex> lock(_mutex);
-#ifdef NEW_GAIN_BEHAVIOUR
-        const int maxGain = 62; // gain table size
-#else
-        const int maxGain = 74;
-#endif
-        auto value_offset = value + 12;           //pga offset
-        if (value_offset >= maxGain) //do not exceed gain table index
-            value_offset = maxGain-1;
-        else if (value_offset < 0)
-            value_offset = 0;
-        unsigned lna = 0, pga = 0, tia = 0;
-#ifdef NEW_GAIN_BEHAVIOUR
-        //LNA table
-        const unsigned lnaTbl[maxGain] = {
-            0,  0,  0,  1,  1,  1,  2,  2,  2,  3,  3,  3,  4,  4,  4,  5,
-            5,  5,  6,  6,  6,  7,  7,  7,  8,  9,  10, 11, 11, 11, 11, 11,
-            11, 11, 11, 11, 11, 11, 11, 11, 12, 13, 14, 14, 14, 14, 14, 14,
-            14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14
-        };
-        //PGA table
-        const unsigned pgaTbl[maxGain] = {
-            0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,
-            1,  2,  0,  1,  2,  0,  1,  2,  0,  0,  0,  0,  1,  2,  3,  4,
-            5,  6,  7,  8,  9,  10, 11, 12, 12, 12, 12, 13, 14, 15, 16, 17,
-            18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31
-        };
-#else
-        //LNA table
-        const unsigned lnaTbl[maxGain] = {
-            0,  0,  0,  1,  1,  1,  2,  2,  2,  3,  3,  3,  4,  4,  4,  5,
-            5,  5,  6,  6,  6,  7,  7,  7,  8,  9,  10, 11, 11, 11, 11, 11,
-            11, 11, 11, 11, 11, 11, 11, 11, 12, 13, 14, 14, 14, 14, 14, 14,
-            14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
-            14, 14, 14, 14, 14, 14, 14, 14, 14, 14
-        };
-        //PGA table
-        const unsigned pgaTbl[maxGain] = {
-            0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,
-            1,  2,  0,  1,  2,  0,  1,  2,  0,  0,  0,  0,  1,  2,  3,  4,
-            5,  6,  7,  8,  9,  10, 11, 12, 12, 12, 12, 4,  5,  6,  7,  8,
-            9,  10, 11, 12, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
-            22, 23, 24, 25, 26, 27, 28, 29, 30, 31
-        };
-#endif
-        lna = lnaTbl[int(value_offset+0.5)];
-        pga = pgaTbl[int(value_offset+0.5)];
-
-#ifdef NEW_GAIN_BEHAVIOUR
-        if(value_offset > 0) tia = 1;
-#else
-        //TIA table
-        if (value_offset > 51) tia = 2;
-        else if (value_offset > 42) tia = 1;
-#endif
-
-        auto actualLNA = LMS7002M_rfe_set_lna_dist(_lms, ch2LMS(channel), lna+1);
-        auto actualTIA = LMS7002M_rfe_set_tia_dist(_lms, ch2LMS(channel), tia+1);
-        auto actualPGA = LMS7002M_rbb_set_pga_dist(_lms, ch2LMS(channel), pga);
-
-//        printf("Set gains: LNA: %f, TIA: %f, PGA: %f \n", actualLNA, actualTIA, actualPGA);
-
-        _cachedGainValues[direction][channel]["LNA"] = actualLNA;
-        _cachedGainValues[direction][channel]["TIA"] = actualTIA;
-        _cachedGainValues[direction][channel]["PGA"] = actualPGA;
-    }      
+void SoapyXTRX::setGain(const int direction, const size_t channel, const double value)
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyXTRX::setGain(%s, %d, %g dB)", dirName, int(channel), value);
+    lms7Device->SetGain(direction==SOAPY_SDR_TX,channel,value);
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "Actual %s[%d] gain %g dB", dirName, int(channel), this->getGain(direction, channel));
 }
 
-void SoapyXTRX::setGain(const int direction, const size_t channel,
-                        const std::string &name, const double value) {
-    std::lock_guard<std::mutex> lock(_mutex);
-
-    SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyXTRX::setGain(%s, ch%d, %s, %f dB)",
-                   dir2Str(direction), channel, name.c_str(), value);
-
-    double &actualValue = _cachedGainValues[direction][channel][name];
-
-    if (direction == SOAPY_SDR_RX and name == "LNA") {
-        actualValue = LMS7002M_rfe_set_lna(_lms, ch2LMS(channel), value);
-    }
-
-    if (direction == SOAPY_SDR_RX and name == "LB_LNA") {
-        actualValue =
-            LMS7002M_rfe_set_loopback_lna(_lms, ch2LMS(channel), value);
-    }
-
-    if (direction == SOAPY_SDR_RX and name == "TIA") {
-        actualValue = LMS7002M_rfe_set_tia(_lms, ch2LMS(channel), value);
-    }
-
-    if (direction == SOAPY_SDR_RX and name == "PGA") {
-        actualValue = LMS7002M_rbb_set_pga(_lms, ch2LMS(channel), value);
-    }
-
-    if (direction == SOAPY_SDR_TX and name == "PAD") {
-        actualValue = LMS7002M_trf_set_pad(_lms, ch2LMS(channel), value);
-    }
-
-    if (direction == SOAPY_SDR_TX and name == "LB_PAD") {
-        actualValue =
-            LMS7002M_trf_set_loopback_pad(_lms, ch2LMS(channel), value);
-    }
+double SoapyXTRX::getGain(const int direction, const size_t channel) const
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    return lms7Device->GetGain(direction==SOAPY_SDR_TX, channel);
 }
 
-double SoapyXTRX::getGain(const int direction, const size_t channel,
-                          const std::string &name) const {
-    return _cachedGainValues.at(direction).at(channel).at(name);
+void SoapyXTRX::setGain(const int direction, const size_t channel, const std::string &name, const double value)
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyXTRX::setGain(%s, %d, %s, %g dB)", dirName, int(channel), name.c_str(), value);
+
+    lms7Device->SetGain(direction==SOAPY_SDR_TX, channel, value, name);
+
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "Actual %s%s[%d] gain %g dB", dirName, name.c_str(), int(channel), this->getGain(direction, channel, name));
 }
 
-SoapySDR::Range SoapyXTRX::getGainRange(const int direction,
-                                        const size_t channel,
-                                        const std::string &name) const {
-    if (direction == SOAPY_SDR_RX and name == "LNA")
-        return SoapySDR::Range(0.0, 30.0);
-    if (direction == SOAPY_SDR_RX and name == "LB_LNA")
-        return SoapySDR::Range(0.0, 40.0);
-    if (direction == SOAPY_SDR_RX and name == "TIA")
-        return SoapySDR::Range(0.0, 12.0);
-    if (direction == SOAPY_SDR_RX and name == "PGA")
-        return SoapySDR::Range(-12.0, 19.0);
-    if (direction == SOAPY_SDR_TX and name == "PAD")
-        return SoapySDR::Range(-52.0, 0.0);
-    if (direction == SOAPY_SDR_TX and name == "LB_PAD")
-        return SoapySDR::Range(-4.3, 0.0);
-    return SoapySDR::Device::getGainRange(direction, channel, name);
+double SoapyXTRX::getGain(const int direction, const size_t channel, const std::string &name) const
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    return lms7Device->GetGain(direction==SOAPY_SDR_TX, channel, name);
+}
+
+SoapySDR::Range SoapyXTRX::getGainRange(const int direction, const size_t channel) const
+{
+    auto range = lms7Device->GetGainRange(direction==SOAPY_SDR_TX, channel);
+    return SoapySDR::Range(range.min, range.max);
+}
+
+SoapySDR::Range SoapyXTRX::getGainRange(const int direction, const size_t channel, const std::string &name) const
+{
+    auto range = lms7Device->GetGainRange(direction==SOAPY_SDR_TX, channel, name);
+    return SoapySDR::Range(range.min, range.max);
 }
 
 
@@ -642,119 +591,149 @@ SoapySDR::Range SoapyXTRX::getGainRange(const int direction,
  * Frequency API
  ******************************************************************/
 
-void SoapyXTRX::setFrequency(const int direction, const size_t channel,
-                             const std::string &name, const double frequency,
-                             const SoapySDR::Kwargs &/*args*/) {
-    std::unique_lock<std::mutex> lock(_mutex);
 
-    SoapySDR::logf(SOAPY_SDR_DEBUG,
-                   "SoapyXTRX::setFrequency(%s, ch%d, %s, %f MHz)",
-                   dir2Str(direction), channel, name.c_str(), frequency / 1e6);
-
-    if (name == "RF") {
-        double actualFreq = 0.0;
-        int ret = LMS7002M_set_lo_freq(_lms, dir2LMS(direction), _refClockRate,
-                                       frequency, &actualFreq);
-        if (ret != 0)
-            throw std::runtime_error("SoapyXTRX::setFrequency(" +
-                                     std::to_string(frequency / 1e6) +
-                                     " MHz) failed - " + std::to_string(ret));
-        _cachedFreqValues[direction][0][name] = actualFreq;
-        _cachedFreqValues[direction][1][name] = actualFreq;
-    }
-
-    if (name == "BB") {
-        const double baseRate = this->getTSPRate();
-        if (direction == SOAPY_SDR_RX)
-            LMS7002M_rxtsp_set_freq(_lms, ch2LMS(channel),
-                                    frequency / baseRate);
-        if (direction == SOAPY_SDR_TX)
-            LMS7002M_txtsp_set_freq(_lms, ch2LMS(channel),
-                                    frequency / baseRate);
-        _cachedFreqValues[direction][channel][name] = frequency;
-    }
+SoapySDR::ArgInfoList SoapyXTRX::getFrequencyArgsInfo(const int direction, const size_t channel) const
+{
+    return SoapySDR::Device::getFrequencyArgsInfo(direction, channel);
 }
 
-double SoapyXTRX::getFrequency(const int direction, const size_t channel,
-                               const std::string &name) const {
-    return _cachedFreqValues.at(direction).at(channel).at(name);
+void SoapyXTRX::setFrequency(int direction, size_t channel, double frequency, const SoapySDR::Kwargs &args)
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    if (lms7Device->SetFrequency(direction == SOAPY_SDR_TX, channel, frequency)!=0)
+    {
+        SoapySDR::logf(SOAPY_SDR_ERROR, "setFrequency(%s, %d, %g MHz) Failed", dirName, int(channel), frequency/1e6);
+        throw std::runtime_error("SoapyXTRX::setFrequency() failed");
+    }
+    mChannels[bool(direction)].at(channel).freq = frequency;
+    if (setBBLPF(direction, channel, mChannels[direction].at(channel).bw)!= 0)
+        SoapySDR::logf(SOAPY_SDR_ERROR, "setBBLPF(%s, %d, RF, %g MHz) Failed", dirName, int(channel), mChannels[direction].at(channel).bw/1e6);
 }
 
-std::vector<std::string> SoapyXTRX::listFrequencies(const int /*direction*/,
-                                                    const size_t /*channel*/) const {
+void SoapyXTRX::setFrequency(const int direction, const size_t channel, const std::string &name, const double frequency, const SoapySDR::Kwargs &args)
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyXTRX::setFrequency(%s, %d, %s, %g MHz)", dirName, int(channel), name.c_str(), frequency/1e6);
+    bool isTx = direction == SOAPY_SDR_TX;
+    if (name == "RF")
+    {
+        const auto clkId = (direction == SOAPY_SDR_TX)? LMS_CLOCK_SXT : LMS_CLOCK_SXR;
+        if (lms7Device->SetClockFreq(clkId, frequency, channel)!=0)
+        {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "setFrequency(%s, %d, RF, %g MHz) Failed", dirName, int(channel), frequency/1e6);
+            throw std::runtime_error("SoapyXTRX::setFrequency(RF) failed");
+        }
+        mChannels[bool(direction)].at(channel).freq = frequency;
+
+        if (setBBLPF(direction, channel, mChannels[direction].at(channel).bw)!= 0)
+            SoapySDR::logf(SOAPY_SDR_ERROR, "setBBLPF(%s, %d, RF, %g MHz) Failed", dirName, int(channel), mChannels[direction].at(channel).bw/1e6);
+        _channelsToCal.emplace(direction, channel);
+        return;
+    }
+
+    if (name == "BB")
+    {
+        lms7Device->SetNCOFreq(isTx, channel, 0, direction == SOAPY_SDR_TX ? frequency : -frequency);
+        return;
+    }
+
+    throw std::runtime_error("SoapyLMS7::setFrequency("+name+") unknown name");
+}
+
+double SoapyXTRX::getFrequency(const int direction, const size_t channel, const std::string &name) const
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+
+    if (name == "RF")
+    {
+        const auto clkId = (direction == SOAPY_SDR_TX)? LMS_CLOCK_SXT : LMS_CLOCK_SXR;
+        return lms7Device->GetClockFreq(clkId,channel);
+    }
+
+    if (name == "BB")
+    {
+        const bool isTx = (direction == SOAPY_SDR_TX);
+        double freq = lms7Device->GetNCOFreq(isTx, channel, 0);
+        return isTx ? freq : -freq;
+    }
+
+    throw std::runtime_error("SoapyXTRX::getFrequency("+name+") unknown name");
+}
+
+double SoapyXTRX::getFrequency(const int direction, const size_t channel) const
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    return lms7Device->GetFrequency(direction == SOAPY_SDR_TX, channel);
+}
+
+std::vector<std::string> SoapyXTRX::listFrequencies(const int /*direction*/, const size_t /*channel*/) const
+{
     std::vector<std::string> opts;
     opts.push_back("RF");
     opts.push_back("BB");
     return opts;
 }
 
-SoapySDR::RangeList
-SoapyXTRX::getFrequencyRange(const int /*direction*/, const size_t /*channel*/,
-                             const std::string &name) const {
+SoapySDR::RangeList SoapyXTRX::getFrequencyRange(const int direction, const size_t channel, const std::string &name) const
+{
     SoapySDR::RangeList ranges;
-    if (name == "RF") {
-        ranges.push_back(SoapySDR::Range(100e3, 3.8e9));
+    if (name == "RF")
+    {
+        ranges.push_back(SoapySDR::Range(30e6, 3.8e9));
     }
-    if (name == "BB") {
-        const double rate = this->getTSPRate();
-        ranges.push_back(SoapySDR::Range(-rate / 2, rate / 2));
+    if (name == "BB")
+    {
+        std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+        const auto lmsDir = (direction == SOAPY_SDR_TX)?LMS_CLOCK_TXTSP:LMS_CLOCK_RXTSP;
+        const double dspRate = lms7Device->GetClockFreq(lmsDir,channel);
+        ranges.push_back(SoapySDR::Range(-dspRate/2, dspRate/2));
     }
     return ranges;
 }
 
-
-/*******************************************************************
- * Sample Rate API
- ******************************************************************/
-
-void SoapyXTRX::setSampleRate(const int direction, const size_t,
-                              const double rate) {
-    /*
-     * Because the LMS7002M chip uses a single source clock for the TSP units,
-     * we are going to simplify life and just not allow users to have separate
-     * sampling rates for Tx and Rx.  The LimeSDR does something similar [0],
-     * where CGEN is always set when you ask for Rx or Tx to operate at a
-     * specific sampling rate, so if you attempt to set a mismatched rate, you
-     * will end up simply clobbering the last CGEN rate that was set.
-     *
-     * [0]: https://github.com/myriadrf/LimeSuite/blob/a45e482dad28508d8787e0fdc5168d45ac877ab5/src/API/LimeSDR.cpp#L44-L52
-     */
-
-    // We are just going to set CGEN to 8x requested rate, knowing that we have
-    // configured the clock dividers to set our `Tx/Rx` clocks the same, and we
-    // have a 4x clock divider applied on both the Tx/Rx clock distribution
-    // branches, AND we want the ADC/DAC to do 2x interpolation down below:
-    if (this->getTSPRate() != rate*2) {
-        this->setMasterClockRate(rate*8);
-    }
-    SoapySDR::logf(
-        SOAPY_SDR_DEBUG,
-        "SoapyXTRX::setSampleRate(%s, %f MHz), CGEN %f MHz",
-        dir2Str(direction), rate / 1e6, this->getTSPRate() / 1e6);
-
-    // New scope to prevent the lock from being taken before we call `setMasterClockRate()`,
-    // Since this lock is not recursion-safe.
-    {
-        std::lock_guard<std::mutex> lock(_mutex);
-
-        // apply the settings, both the interp/decim has to be matched with the lml
-        // interface divider the lml interface needs a clock rate 2x the sample rate
-        // for DDR TRX IQ mode
-        if (direction == SOAPY_SDR_RX) {
-            LMS7002M_rxtsp_set_decim(_lms, LMS_CHAB, 2);
-            LMS7002M_configure_lml_port(_lms, LMS_PORT1, LMS_RX, 1);
-        }
-        if (direction == SOAPY_SDR_TX) {
-            LMS7002M_txtsp_set_interp(_lms, LMS_CHAB, 2);
-            LMS7002M_configure_lml_port(_lms, LMS_PORT2, LMS_TX, 1);
-        }
-
-        _cachedSampleRates[direction] = rate;
-    }
+SoapySDR::RangeList SoapyXTRX::getFrequencyRange(const int direction, const size_t channel) const
+{
+    SoapySDR::RangeList ranges;
+    ranges.push_back(SoapySDR::Range(0.0, 3.8e9));
+    return ranges;
 }
 
-double SoapyXTRX::getSampleRate(const int direction, const size_t) const {
-    return _cachedSampleRates.at(direction);
+void SoapyXTRX::setSampleRate(const int direction, const size_t channel, const double rate)
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    auto streams = activeStreams;
+    for (auto s : streams)
+        deactivateStream(s);
+
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "setSampleRate(%s, %d, %g MHz)", dirName, int(channel), rate/1e6);
+    auto ret = lms7Device->SetRate(direction == SOAPY_SDR_TX, rate, oversampling);
+
+    //if bandwidth is not explicitly selected set it to sample rate
+    if (mChannels[bool(direction)].at(channel).bw < 0)
+    {
+        lms_range_t range;
+        LMS_GetLPFBWRange(lms7Device, direction == SOAPY_SDR_TX, &range);
+        double bw = rate < range.min ? range.min : rate;
+        bw = bw < range.max ? bw : range.max;
+        setBBLPF(direction, channel, bw);
+    }
+
+    for (auto s : streams)
+        activateStream(s);
+    if (ret != 0)
+    {
+        SoapySDR::logf(SOAPY_SDR_ERROR, "setSampleRate(%s, %d, %g MHz) Failed", dirName, int(channel), rate/1e6);
+        throw std::runtime_error("SoapyLMS7::setSampleRate() failed");
+    }
+    sampleRate[bool(direction)] = rate;
+    return;
+}
+
+double SoapyXTRX::getSampleRate(const int direction, const size_t channel) const
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+
+    return lms7Device->GetRate((direction == SOAPY_SDR_TX),channel);
 }
 
 std::vector<double> SoapyXTRX::listSampleRates(const int /*direction*/,
@@ -780,39 +759,74 @@ std::vector<std::string> SoapyXTRX::getStreamFormats(const int /*direction*/,
  * BW filter API
  ******************************************************************/
 
-void SoapyXTRX::setBandwidth(const int direction, const size_t channel,
-                             const double bw) {
-    std::lock_guard<std::mutex> lock(_mutex);
-
-    SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyXTRX::setBandwidth(%s, ch%d, %f MHz)",
-                   dir2Str(direction), channel, bw / 1e6);
-
-    int ret = 0;
-    double &actualBw = _cachedFilterBws[direction][channel];
-    if (direction == SOAPY_SDR_RX) {
-        //ret = LMS7002M_rbb_set_filter_bw(_lms, ch2LMS(channel), bw, &actualBw);
-        ret = LMS7002M_mcu_calibration_rx(_lms, ch2LMS(channel), _refClockRate, bw);
-        if (ret == 0)
-            actualBw = bw;
+int SoapyXTRX::setBBLPF(bool direction, size_t channel, double bw)
+{
+    if (bw < 0)
+        return 0;
+    double frequency = mChannels[direction].at(channel).freq;
+    if (frequency > 0 && frequency < 30e6)
+    {
+        bw += 2*(30e6 - frequency);
+        bw = bw > 60e6 ? 60e6 : bw;
     }
-    if (direction == SOAPY_SDR_TX) {
-        //ret = LMS7002M_tbb_set_filter_bw(_lms, ch2LMS(channel), bw, &actualBw);
-        ret = LMS7002M_mcu_calibration_tx(_lms, ch2LMS(channel), _refClockRate, bw);
-        if (ret == 0)
-            actualBw = bw;
+    if (std::abs(bw-mChannels[direction].at(channel).rf_bw)>10e3)
+    {
+        SoapySDR::logf(SOAPY_SDR_DEBUG, "lms7Device->SetLPF(%s, %d, %g MHz)", dirName, int(channel), bw/1e6);
+        if (lms7Device->SetLPF(direction==SOAPY_SDR_TX, channel, true, bw) == 0)
+            mChannels[direction].at(channel).rf_bw = bw;
+        else
+            return -1;
     }
-
-    if (ret != 0)
-        throw std::runtime_error("SoapyXTRX::setBandwidth(" +
-                                 std::to_string(bw / 1e6) + " MHz) failed - " +
-                                 std::to_string(ret));
+    return 0;
 }
 
-double SoapyXTRX::getBandwidth(const int direction,
-                               const size_t channel) const {
-    return _cachedFilterBws.at(direction).at(channel);
+void SoapyXTRX::setBandwidth(const int direction, const size_t channel, const double bw)
+{
+    if (bw == 0.0) return; //special ignore value
+
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyLMS7::setBandwidth(%s, %d, %g MHz)", dirName, int(channel), bw/1e6);
+
+    int ret = LMS7002M_mcu_calibration_rx(_lms, ch2LMS(channel), _refClockRate, bw);
+
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "Test SoapyLMS7::setBandwidth(%s, %d, %g MHz)", dirName, int(channel), bw/1e6);
+
+    if (setBBLPF(direction, channel, bw)!=0)
+    {
+        SoapySDR::logf(SOAPY_SDR_ERROR, "setBBLPF(%s, %d, %g MHz) Failed", dirName, int(channel), bw/1e6);
+        throw std::runtime_error("setBandwidth() failed");
+    }
+
+    mChannels[bool(direction)].at(channel).bw = bw;
+    _channelsToCal.emplace(direction, channel);
 }
 
+double SoapyXTRX::getBandwidth(const int direction, const size_t channel) const
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    return mChannels[bool(direction)].at(channel).bw;
+}
+
+SoapySDR::RangeList SoapyXTRX::getBandwidthRange(const int direction, const size_t channel) const
+{
+    SoapySDR::RangeList bws;
+
+    if (direction == SOAPY_SDR_RX)
+    {
+        lms_range_t range;
+        LMS_GetLPFBWRange(lms7Device, LMS_CH_RX, &range);
+        bws.push_back(SoapySDR::Range(range.min, range.max));
+    }
+    if (direction == SOAPY_SDR_TX)
+    {
+        bws.push_back(SoapySDR::Range(5e6, 40e6));
+        bws.push_back(SoapySDR::Range(50e6, 130e6));
+    }
+
+    return bws;
+}
+
+/*
 std::vector<double> SoapyXTRX::listBandwidths(const int direction,
                                               const size_t) const {
     std::vector<double> bws;
@@ -841,6 +855,7 @@ std::vector<double> SoapyXTRX::listBandwidths(const int direction,
 
     return bws;
 }
+*/
 
 
 /*******************************************************************
@@ -1152,6 +1167,18 @@ std::string SoapyXTRX::readSetting(const std::string &key) const
                 + " TX hw count: " + std::to_string(_tx_stream.hw_count)
                 + " TX sw count: " + std::to_string(_tx_stream.sw_count)
                 + " TX user count: " + std::to_string(_tx_stream.user_count);
+    } else if (key == "DMA_BUFFER_RX_HW_COUNT") {
+        return std::to_string(_rx_stream.hw_count);
+    } else if (key == "DMA_BUFFER_RX_SW_COUNT") {
+        return std::to_string(_rx_stream.sw_count);
+    } else if (key == "DMA_BUFFER_RX_USER_COUNT") {
+        return std::to_string(_rx_stream.user_count);
+    } else if (key == "DMA_BUFFER_TX_HW_COUNT") {
+        return std::to_string(_tx_stream.hw_count);
+    } else if (key == "DMA_BUFFER_TX_SW_COUNT") {
+        return std::to_string(_tx_stream.sw_count);
+    } else if (key == "DMA_BUFFER_TX_USER_COUNT") {
+        return std::to_string(_tx_stream.user_count);
     } else
         throw std::runtime_error("SoapyXTRX::readSetting(" + key + ") unknown key");
 }
@@ -1592,7 +1619,7 @@ std::vector<SoapySDR::Kwargs> findXTRX(const SoapySDR::Kwargs &args) {
  **********************************************************************/
 
 SoapySDR::Device *makeXTRX(const SoapySDR::Kwargs &args) {
-    return new SoapyXTRX(args);
+    return new SoapyXTRX(argsToHandle(args), args);
 }
 
 

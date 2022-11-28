@@ -51,6 +51,25 @@ include_directories(${LMS7002M_INCLUDE_DIR})
 
 
 ########################################################################
+## Lime discovery
+########################################################################
+
+message(STATUS "Looking for Lime in ${LIME_ROOT}...")
+
+find_path(LIME_INCLUDE_DIR lime/LMS7002M.h
+          HINTS ${LIME_ROOT}
+          PATH_SUFFIXES include
+          REQUIRED)
+
+find_library(LIME_LIBRARY LimeSuite
+             HINTS ${LIME_ROOT}
+             PATH_SUFFIXES lib
+             REQUIRED)
+
+include_directories(${LIME_INCLUDE_DIR})
+
+
+########################################################################
 ## CUDA discovery
 ########################################################################
 
@@ -70,7 +89,7 @@ endif()
 
 add_executable(main main.c)
 
-target_link_libraries(main ${LITEPCIE_LIBRARY} ${LMS7002M_LIBRARY} CUDA::cuda_driver m)
+target_link_libraries(main ${LITEPCIE_LIBRARY} ${LMS7002M_LIBRARY} ${LIME_LIBRARY} CUDA::cuda_driver m)
 
 
 ########################################################################
@@ -82,6 +101,6 @@ find_package(SoapySDR "0.2.1" REQUIRED)
 SOAPY_SDR_MODULE_UTIL(
     TARGET SoapyXTRX
     SOURCES XTRXDevice.cpp Streaming.cpp i2c0.cpp i2c1.cpp
-    LIBRARIES ${LITEPCIE_LIBRARY} ${LMS7002M_LIBRARY} CUDA::cuda_driver m
+    LIBRARIES ${LITEPCIE_LIBRARY} ${LMS7002M_LIBRARY} ${LIME_LIBRARY} CUDA::cuda_driver m
 )
 

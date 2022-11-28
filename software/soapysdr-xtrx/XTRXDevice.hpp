@@ -17,6 +17,8 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <iostream>
+#include <set>
+#include <lime/lms7_device.h>
 
 #include <LMS7002M/LMS7002M.h>
 #include "liblitepcie.h"
@@ -46,9 +48,14 @@
 
 enum class TargetDevice { CPU, GPU };
 
+namespace lime
+{
+    class LIME_API LMS7_Device;
+}
+
 class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
   public:
-    SoapyXTRX(const SoapySDR::Kwargs &args);
+    SoapyXTRX(const lime::ConnectionHandle &handle, const SoapySDR::Kwargs &args);
     ~SoapyXTRX(void);
 
     // Identification API
@@ -74,10 +81,10 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
                                   const std::vector<size_t> &channels,
                                   const SoapySDR::Kwargs &args);
     void closeStream(SoapySDR::Stream *stream) override;
-    int activateStream(SoapySDR::Stream *stream, const int flags,
-                       const long long timeNs, const size_t numElems) override;
-    int deactivateStream(SoapySDR::Stream *stream, const int flags,
-                         const long long timeNs) override;
+    int activateStream(SoapySDR::Stream *stream, const int flags = 0,
+                       const long long timeNs = 0, const size_t numElems = 0) override;
+    int deactivateStream(SoapySDR::Stream *stream, const int flags = 0,
+                         const long long timeNs = 0) override;
     size_t getStreamMTU(SoapySDR::Stream *stream) const override;
     size_t getNumDirectAccessBuffers(SoapySDR::Stream *stream) override;
     int getDirectAccessBufferAddrs(SoapySDR::Stream *stream,
@@ -118,9 +125,7 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
                      const std::complex<double> &offset) override;
     std::complex<double> getDCOffset(const int direction,
                                      const size_t channel) const override;
-    bool hasIQBalance(const int /*direction*/, const size_t /*channel*/) const override {
-        return true;
-    }
+    bool hasIQBalance(const int /*direction*/, const size_t /*channel*/) const override;
     void setIQBalance(const int direction, const size_t channel,
                       const std::complex<double> &balance) override;
     std::complex<double> getIQBalance(const int direction,
@@ -135,8 +140,10 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
                  const std::string &name, const double value) override;
     void setGain(const int direction, const size_t channel,
                  const double value) override;
+    double getGain(const int direction, const size_t channel) const;
     double getGain(const int direction, const size_t channel,
                    const std::string &name) const override;
+    SoapySDR::Range getGainRange(const int direction, const size_t channel) const;
     SoapySDR::Range getGainRange(const int direction, const size_t channel,
                                  const std::string &name) const override;
 
@@ -144,16 +151,21 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
         _cachedGainValues;
 
     // Frequency API
-    void
-    setFrequency(const int direction, const size_t channel, const std::string &,
-                 const double frequency,
-                 const SoapySDR::Kwargs &args = SoapySDR::Kwargs()) override;
-    double getFrequency(const int direction, const size_t channel,
-                        const std::string &name) const override;
+    SoapySDR::ArgInfoList getFrequencyArgsInfo(const int direction, const size_t channel) const;
+
+
+    void setFrequency(const int direction, const size_t channel, const double frequency, const SoapySDR::Kwargs &args = SoapySDR::Kwargs());
+
+    void setFrequency(const int direction, const size_t channel, const std::string &name, const double frequency, const SoapySDR::Kwargs &args = SoapySDR::Kwargs()) override;
+
+    double getFrequency(const int direction, const size_t channel, const std::string &name) const;
+
+    double getFrequency(const int direction, const size_t channel) const override;
     std::vector<std::string> listFrequencies(const int,
                                              const size_t) const override;
-    SoapySDR::RangeList getFrequencyRange(const int, const size_t,
-                                          const std::string &) const override;
+    SoapySDR::RangeList getFrequencyRange(const int direction, const size_t channel) const;
+
+    SoapySDR::RangeList getFrequencyRange(const int direction, const size_t channel, const std::string &name) const;
 
     std::map<int, std::map<size_t, std::map<std::string, double>>>
         _cachedFreqValues;
@@ -172,8 +184,10 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
                       const double bw) override;
     double getBandwidth(const int direction,
                         const size_t channel) const override;
-    std::vector<double> listBandwidths(const int direction,
-                                       const size_t channel) const override;
+//    std::vector<double> listBandwidths(const int direction,
+//                                       const size_t channel) const override;
+
+    SoapySDR::RangeList getBandwidthRange(const int direction, const size_t channel) const;
 
     std::map<int, std::map<size_t, double>> _cachedFilterBws;
 
@@ -321,6 +335,28 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
   private:
     SoapySDR::Stream *const TX_STREAM = (SoapySDR::Stream *)0x1;
     SoapySDR::Stream *const RX_STREAM = (SoapySDR::Stream *)0x2;
+
+    struct Channel{
+        Channel():freq(-1),bw(-1),rf_bw(-1),cal_bw(-1),gfir_bw(-1),tst_dc(0){};
+        double freq;
+        double bw;
+        double rf_bw;
+        double cal_bw;
+        double gfir_bw;
+        int tst_dc;
+    };
+
+    int setBBLPF(bool direction, size_t channel, double bw);
+
+    const SoapySDR::Kwargs _deviceArgs; //!< stash of constructor arguments
+    const std::string _moduleName;
+    lime::LMS7_Device * lms7Device;
+    double sampleRate[2]; //sampleRate[direction]
+    int oversampling;
+    std::set<std::pair<int, size_t>> _channelsToCal;
+    mutable std::recursive_mutex _accessMutex;
+    std::vector<Channel> mChannels[2]; //mChannels[direction]
+    std::set<SoapySDR::Stream *> activeStreams;
 
     struct litepcie_ioctl_mmap_dma_info _dma_mmap_info;
     TargetDevice _dma_target;

@@ -126,7 +126,7 @@ function do_txrx(mode::Symbol;
 
             ct.frequency = frequency
         end
-
+#=
         for (c_idx, cr) in enumerate(dev.rx)
             cr.sample_rate = sample_rate
             cr.bandwidth = sample_rate
@@ -136,6 +136,10 @@ function do_txrx(mode::Symbol;
             ct.sample_rate = sample_rate
             ct.bandwidth = sample_rate
         end
+=#
+#        for (c_idx, cr) in enumerate(dev.rx)
+#            cr[SoapySDR.Setting("CALIBRATE_RX")] = "TRUE"
+#        end
 
         # Do a quick FPGA loopback sanity check for these clocking values
         if !skip_sanity_check
@@ -240,9 +244,9 @@ function do_txrx(mode::Symbol;
         # This should always be the case, but best to be sure.
         wait(t_tx)
 
-        dma_buffers = dev[SoapySDR.Setting("DMA_BUFFERS")]
+#        dma_buffers = dev[SoapySDR.Setting("DMA_BUFFERS")]
         sleep(0.1)
-        println(dma_buffers)
+#        println(dma_buffers)
 
         return iq_data, data_tx
     end
