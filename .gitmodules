@@ -22,3 +22,6 @@
 	path = software/SoapySDR.jl
 	url = https://github.com/JuliaTelecom/SoapySDR.jl.git
 	shallow = true
+[submodule "software/GNSSReceiver.jl"]
+	path = software/GNSSReceiver.jl
+	url = https://github.com/JuliaGNSS/GNSSReceiver.jl.git
