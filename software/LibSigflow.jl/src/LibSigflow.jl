@@ -151,10 +151,11 @@ function stream_data(s_rx::SoapySDR.Stream{T}, end_condition::Union{Integer,Base
             if e isa SoapySDR.SoapySDRDeviceError
                 if e.status == SoapySDR.SOAPY_SDR_OVERFLOW
                     _num_overflows[] += 1
+                    print("O")
                 elseif e.status == SoapySDR.SOAPY_SDR_TIMEOUT
-                    println("Tᵣ")
+                    print("Tᵣ")
                 else
-                    println("Eᵣ")
+                    print("Eᵣ")
                 end
             else
                 rethrow(e)
@@ -185,10 +186,11 @@ function stream_data(s_tx::SoapySDR.Stream{T}, in::MatrixSizedChannel{T}) where 
                     if e isa SoapySDR.SoapySDRDeviceError
                         if e.status == SoapySDR.SOAPY_SDR_UNDERFLOW
                             _num_underflows[] += 1
+                            print("U")
                         elseif e.status == SoapySDR.SOAPY_SDR_TIMEOUT
-                            println("Tₜ")
+                            print("Tₜ")
                         else
-                            println("Eₜ")
+                            print("Eₜ")
                         end
                     else
                         rethrow(e)
