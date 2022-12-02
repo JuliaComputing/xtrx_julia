@@ -178,9 +178,14 @@ function eval_missing_samples1(;
 )
     num_samples_to_track = Int(upreferred(sample_rate * 1u"ms"))
 
-    Device(first(Devices())) do dev
+    device_kwargs = Dict{Symbol,Any}()
+    if chomp(String(read(`hostname`))) == "pathfinder"
+        device_kwargs[:driver] = "XTRX"
+        device_kwargs[:serial] = "12cc5241b88485c"
+    end
 
-        fig, close_stream_event = open_and_display_figure()
+    Device(first(Devices(;device_kwargs...))) do dev
+
         format = dev.rx[1].native_stream_format
         fullscale = dev.tx[1].fullscale
 
@@ -197,11 +202,18 @@ function eval_missing_samples1(;
             cr.bandwidth = sample_rate
             cr.frequency = frequency
             cr.sample_rate = sample_rate
-            # Gain does not seem to have an effect with BladeRF
-            # Even if gain_mode is set to false
             cr.gain = 0u"dB"
             cr.gain_mode = false
         end
+
+        dma_buffers = (
+            rx_hw_count = Int[],
+            rx_sw_count = Int[],
+            rx_user_count = Int[],
+            tx_hw_count = Int[],
+            tx_sw_count = Int[],
+            tx_user_count = Int[],
+        )
 
         sat_prn = 34
         code_frequency = get_code_frequency(gnss_system)
@@ -210,53 +222,48 @@ function eval_missing_samples1(;
 
         stream_tx = SoapySDR.Stream(format, dev.tx)
 
-        num_samples = 2000#stream_tx.mtu * 10
+        num_samples = stream_tx.mtu
         signals = zeros(num_samples, stream_tx.nchannels)
-#        num_total_samples = Int(upreferred(sample_rate * 2000u"ms"))
+        num_total_samples = Int(upreferred(sample_rate * run_time))
 
         # Construct streams
         phase = 0.0
         tx_go = Base.Event()
         transmitted_samples = 0
         c_tx = generate_stream(num_samples, stream_tx.nchannels; T=format) do buff
-            if close_stream_event.set
-#            if transmitted_samples > num_total_samples
+            if transmitted_samples > num_total_samples
                 return false
             end
             signals[:, 1] = gen_code(num_samples, gnss_system, sat_prn, sample_rate, code_frequency, phase) .* fullscale ./ 3
             copyto!(buff, format.(round.(signals)))
             phase = update_code_phase(gnss_system, num_samples, code_frequency, sample_rate, phase)
             transmitted_samples += num_samples
+            if count_dma_buffers
+                push!(dma_buffers.rx_hw_count, parse(Int, dev[SoapySDR.Setting("DMA_BUFFER_RX_HW_COUNT")]))
+                push!(dma_buffers.rx_sw_count, parse(Int, dev[SoapySDR.Setting("DMA_BUFFER_RX_SW_COUNT")]))
+                push!(dma_buffers.rx_user_count, parse(Int, dev[SoapySDR.Setting("DMA_BUFFER_RX_USER_COUNT")]))
+                push!(dma_buffers.tx_hw_count, parse(Int, dev[SoapySDR.Setting("DMA_BUFFER_TX_HW_COUNT")]))
+                push!(dma_buffers.tx_sw_count, parse(Int, dev[SoapySDR.Setting("DMA_BUFFER_TX_SW_COUNT")]))
+                push!(dma_buffers.tx_user_count, parse(Int, dev[SoapySDR.Setting("DMA_BUFFER_TX_USER_COUNT")]))
+            end
             return true
         end
         t_tx = stream_data(stream_tx, tripwire(c_tx, tx_go))
 
         # RX reads the buffers in, and pushes them onto `iq_data`
-        samples_channel = flowgate(stream_data(stream_rx, close_stream_event; leadin_buffers=0), tx_go)
-#        samples_channel = flowgate(stream_data(stream_rx, num_total_samples; leadin_buffers=0), tx_go)
-
-#        iq_data = collect_buffers(samples_channel)
+        samples_channel = flowgate(stream_data(stream_rx, num_total_samples; leadin_buffers=0), tx_go)
 
         reshunked_channel = rechunk(samples_channel, num_samples_to_track)
 
-#        periodograms = calc_periodograms(reshunked_channel, sampling_freq = upreferred(sample_rate / 1u"Hz"))
-#        plot_periodograms(periodograms; fig)
-
-#        float_signal = complex2float(real, reshunked_channel)
-#        plot_signal(float_signal; fig)  
-
         sample_shift_stream = correlate_channel(reshunked_channel, gnss_system, sample_rate, sat_prn)
 
-        concat_sample_shifts = append_vectors(sample_shift_stream)
-
-        diffed_samples_shifts = transform(concat_sample_shifts, xs -> map(x -> diff(x), xs))
-
-        plot_signal(diffed_samples_shifts; fig, ylabel = "Sample shifts")     
-
+        reshunked_sample_shifts = rechunk(sample_shift_stream, 2000)
+ 
+        missing_samples_data = collect_buffers(reshunked_sample_shifts)
 
         # Ensure that we're done transmitting as well.
         # This should always be the case, but best to be sure.
         wait(t_tx)
-#        iq_data, signals
+        missing_samples_data, dma_buffers
     end
 end
