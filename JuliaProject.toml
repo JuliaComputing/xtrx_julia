@@ -1,4 +1,6 @@
 [deps]
+Acquisition = "d4bbf60b-102b-5ffb-8f97-a7ea5817e69f"
+BladeRFHardwareDriver_jll = "ddcda2f0-0770-5eff-b02e-03a583a735ee"
 CEnum = "fa961155-64e5-5f13-b03f-caf6b980ea82"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
@@ -19,5 +21,6 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 Tracking = "10b2438b-ffd4-5096-aa58-44041d5c8f3b"
 Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+WGLMakie = "276b4fcb-3e11-5398-bf8b-a0c2d153d008"
 XTRX = "3933273f-6cdb-4250-9272-8aed09f39780"
 soapysdr_jll = "343a40d9-ed99-5d34-8b56-649aaa4ecee6"

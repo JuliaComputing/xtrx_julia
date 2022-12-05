@@ -7,7 +7,7 @@ export generate_stream, stream_data, membuffer, tee, flowgate, tripwire, rechunk
        collect_psd, consume_channel, spawn_channel_thread, streaming_filter,
        write_to_file, stream_channel, calc_periodograms, self_downconvert,
        append_vectors, complex2float, MatrixSizedChannel, VectorSizedChannel,
-       AbstractSizedChannel
+       AbstractSizedChannel, transform
 
 include("sized_channel.jl")
 
@@ -79,6 +79,19 @@ function membuffer(in::MatrixSizedChannel{T}, max_size::Int = 16) where {T <: Nu
     end
 end
 
+"""
+    transform(in, func)
+
+Transform data
+"""
+function transform(in::AbstractSizedChannel{T}, func) where T
+    spawn_channel_thread(;T, num_samples = in isa MatrixSizedChannel ? in.num_samples : nothing, in.num_antenna_channels) do out
+        consume_channel(in) do buff
+            put!(out, func(buff))
+        end
+    end
+end
+
 
 """
     generate_stream(gen_buff!::Function, buff_size, num_channels)
@@ -146,7 +159,7 @@ function stream_data(s_rx::SoapySDR.Stream{T}, end_condition::Union{Integer,Base
 
         flags = Ref{Int}(0)
         try
-            read!(s_rx, split_matrix(buff); flags, throw_error = true)
+            read!(s_rx, split_matrix(buff); flags, timeout=0.9u"s", throw_error = true)
         catch e
             if e isa SoapySDR.SoapySDRDeviceError
                 if e.status == SoapySDR.SOAPY_SDR_OVERFLOW
@@ -181,7 +194,7 @@ function stream_data(s_tx::SoapySDR.Stream{T}, in::MatrixSizedChannel{T}) where 
             consume_channel(in) do buff
                 flags = Ref{Int}(0)
                 try
-                    write(s_tx, split_matrix(buff); flags, timeout=0.1u"s", throw_error = true)
+                    write(s_tx, split_matrix(buff); flags, timeout=0.9u"s", throw_error = true)
                 catch e
                     if e isa SoapySDR.SoapySDRDeviceError
                         if e.status == SoapySDR.SOAPY_SDR_UNDERFLOW
@@ -196,6 +209,7 @@ function stream_data(s_tx::SoapySDR.Stream{T}, in::MatrixSizedChannel{T}) where 
                         rethrow(e)
                     end
                 end
+#                println("Flags: ", bitstring(flags[]))
             end
 
             # We need to `sleep()` until we're done transmitting,

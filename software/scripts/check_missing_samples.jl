@@ -96,7 +96,7 @@ function eval_missing_samples(;
         ct.bandwidth = sample_rate
         ct.frequency = frequency
         ct.sample_rate = sample_rate
-        ct.gain = 20u"dB"
+        ct.gain = 30u"dB"
         ct.gain_mode = false
 
         # Setup receive parameters
@@ -104,7 +104,7 @@ function eval_missing_samples(;
             cr.bandwidth = sample_rate
             cr.frequency = frequency
             cr.sample_rate = sample_rate
-            cr.gain = 0u"dB"
+            cr.gain = 30u"dB"
             cr.gain_mode = false
         end
 
@@ -157,6 +157,10 @@ function eval_missing_samples(;
 
         reshunked_channel = rechunk(samples_channel, num_samples_to_track)
 
+#        data_channel1, data_channel2 = tee(reshunked_channel)
+
+#        measurement = collect_single_chunk_at(reshunked_channel, counter_threshold = 1000)
+
         sample_shift_stream = correlate_channel(reshunked_channel, gnss_system, sample_rate, sat_prn)
 
         reshunked_sample_shifts = rechunk(sample_shift_stream, 2000)
@@ -167,5 +171,18 @@ function eval_missing_samples(;
         # This should always be the case, but best to be sure.
         wait(t_tx)
         missing_samples_data, dma_buffers
+#        measurement, dma_buffers
     end
+end
+
+function collect_single_chunk_at(in::MatrixSizedChannel{T}; counter_threshold::Int = 1000) where {T <: Number}
+    buffs = Matrix{T}(undef, in.num_samples, in.num_antenna_channels)
+    counter = 0
+    consume_channel(in) do buff
+        if counter == counter_threshold
+            buffs .= buff
+        end
+        counter += 1
+    end
+    return buffs
 end
