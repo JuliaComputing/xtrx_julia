@@ -159,7 +159,7 @@ function stream_data(s_rx::SoapySDR.Stream{T}, end_condition::Union{Integer,Base
 
         flags = Ref{Int}(0)
         try
-            read!(s_rx, split_matrix(buff); flags, throw_error = true)
+            read!(s_rx, split_matrix(buff); flags, timeout=0.9u"s", throw_error = true)
         catch e
             if e isa SoapySDR.SoapySDRDeviceError
                 if e.status == SoapySDR.SOAPY_SDR_OVERFLOW
@@ -194,7 +194,7 @@ function stream_data(s_tx::SoapySDR.Stream{T}, in::MatrixSizedChannel{T}) where 
             consume_channel(in) do buff
                 flags = Ref{Int}(0)
                 try
-                    write(s_tx, split_matrix(buff); flags, timeout=0.1u"s", throw_error = true)
+                    write(s_tx, split_matrix(buff); flags, timeout=0.9u"s", throw_error = true)
                 catch e
                     if e isa SoapySDR.SoapySDRDeviceError
                         if e.status == SoapySDR.SOAPY_SDR_UNDERFLOW
