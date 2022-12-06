@@ -33,6 +33,7 @@
 #include <lime/ConnectionHandle.h>
 #include <lime/lms7_device.h>
 #include <lime/LMS7002M_parameters.h>
+#include <lime/Logger.h>
 #include <sstream>
 
 using namespace lime;
@@ -877,7 +878,11 @@ void SoapyXTRX::setMasterClockRate(const double rate) {
                    rate / 1e6, _masterClockRate / 1e6);
 }
 
-double SoapyXTRX::getMasterClockRate(void) const { return _masterClockRate; }
+double SoapyXTRX::getMasterClockRate(void) const
+{
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    return lms7Device->GetClockFreq(LMS_CLOCK_CGEN);
+}
 
 /*!
  * Set the reference clock rate of the device.
@@ -1259,7 +1264,8 @@ void SoapyXTRX::writeSetting(const std::string &key, const std::string &value) {
     } else if (key == "LOOPBACK_ENABLE") {
         SoapySDR::log(SOAPY_SDR_DEBUG, "Setting Digital Loopback");
         if (value == "TRUE") {
-            LMS7002M_setup_digital_loopback(_lms);
+//            LMS7002M_setup_digital_loopback(_lms);
+            lms7Device->SetDigitalLoopback();
         } else if (value == "FALSE") {
             LMS7002M_configure_lml_port(_lms, LMS_PORT2, LMS_TX, 1);
             LMS7002M_configure_lml_port(_lms, LMS_PORT1, LMS_RX, 1);
@@ -1338,6 +1344,18 @@ void SoapyXTRX::writeSetting(const std::string &key, const std::string &value) {
         uint32_t mask = ((uint32_t)(1 << CSR_LMS7002M_DELAY_RX_DELAY_SIZE)-1) << CSR_LMS7002M_DELAY_RX_DELAY_OFFSET;
         litepcie_writel(_fd, CSR_LMS7002M_DELAY_ADDR,
                         (reg & ~mask) | (delay << CSR_LMS7002M_DELAY_RX_DELAY_OFFSET));
+    } else if (key == "CALIBRATE_TX")
+    {
+        for (size_t channel = 0; channel < lms7Device->GetNumChannels(); channel++)
+        {
+            this->writeSetting(SOAPY_SDR_TX, channel, "CALIBRATE_TX", value);
+        }
+    } else if (key == "CALIBRATE_RX")
+    {
+        for (size_t channel = 0; channel < lms7Device->GetNumChannels(); channel++)
+        {
+            this->writeSetting(SOAPY_SDR_RX, channel, "CALIBRATE_RX", value);
+        }
     } else if (key == "DUMP_INI") {
         LMS7002M_dump_ini(_lms, value.c_str());
     } else if (key == "RXTSP_TONE") {
@@ -1387,12 +1405,29 @@ void SoapyXTRX::writeSetting(const std::string &key, const std::string &value) {
 }
 
 void SoapyXTRX::writeSetting(const int direction, const size_t channel, const std::string &key, const std::string &value) {
+    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+    const bool isTx = (direction == SOAPY_SDR_TX);
+    
     if (key == "DC_OFFSET_WINDOW") {
-//        LMS7002M_rxtsp_set_dc_correction_window(_lms, ch2LMS(channel), std::stoi(value));
-    } else if (key == "CALIBRATE") {
-        LMS7002M_mcu_calibration_dc_offset_iq_imbalance(_lms, dir2LMS(direction), ch2LMS(channel), _refClockRate, _cachedFilterBws[direction][channel], 0);
-    } else if (key == "CALIBRATE_EXTERNAL") {
-        LMS7002M_mcu_calibration_dc_offset_iq_imbalance(_lms, dir2LMS(direction), ch2LMS(channel), _refClockRate, _cachedFilterBws[direction][channel], 1);
+        LMS7002M_rxtsp_set_dc_correction_window(_lms, ch2LMS(channel), std::stoi(value));
+    } else if ((key == "CALIBRATE_TX" or key == "CALIBRATE_EXTERNAL_TX") or (isTx and (key == "CALIBRATE" or key == "CALIBRATE_EXTERNAL")))
+    {
+        unsigned int is_external = (key == "CALIBRATE_EXTERNAL_TX" or key == "CALIBRATE_EXTERNAL");
+        double bw = std::stof(value);
+        SoapySDR::logf(SOAPY_SDR_INFO, "Calibrate Tx %f", bw);
+        if (lms7Device->Calibrate(true, channel, bw, is_external)!=0)
+            throw std::runtime_error(lime::GetLastErrorMessage());
+        _channelsToCal.erase(std::make_pair(direction, channel));
+        mChannels[direction].at(channel).cal_bw = bw;
+    } else if ((key == "CALIBRATE_RX" or key == "CALIBRATE_EXTERNAL_RX") or (not isTx and (key == "CALIBRATE" or key == "CALIBRATE_EXTERNAL")))
+    {
+        unsigned int is_external = (key == "CALIBRATE_EXTERNAL_RX" or key == "CALIBRATE_EXTERNAL");
+        double bw = std::stof(value);
+        SoapySDR::logf(SOAPY_SDR_INFO, "CalibrateRx %f", bw);
+        if (lms7Device->Calibrate(false, channel, bw, is_external)!=0)
+            throw std::runtime_error(lime::GetLastErrorMessage());
+        _channelsToCal.erase(std::make_pair(direction, channel));
+        mChannels[direction].at(channel).cal_bw = bw;
     } else
         throw std::runtime_error("SoapyXTRX::writeChannelSetting(" + key + ", " +
                                  value + ") unknown key");
