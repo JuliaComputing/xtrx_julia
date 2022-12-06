@@ -484,10 +484,10 @@ end
 reduces input by `reductor` function.
 """
 function Base.reduce(reductor::Function, in::MatrixSizedChannel{T}) where {T <: Number}
-    spawn_channel_thread(;T, in.num_antenna_channels) do out
+    spawn_channel_thread(;T, num_samples = 1, in.num_antenna_channels) do out
         consume_channel(in) do signals
             reduced_signal = map(reductor, eachcol(signals))
-            push!(out, reduced_signal)
+            push!(out, collect(reshape(reduced_signal, 1, in.num_antenna_channels)))
         end
     end
 end
