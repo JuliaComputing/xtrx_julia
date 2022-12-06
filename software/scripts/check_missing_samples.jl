@@ -86,7 +86,7 @@ function eval_missing_samples(;
         device_kwargs[:serial] = "12cc5241b88485c"
     end
 
-    Device(first(Devices(;device_kwargs...))) do dev
+    Device(Devices(;device_kwargs...)[2]) do dev
 
         format = dev.rx[1].native_stream_format
         fullscale = dev.tx[1].fullscale
@@ -96,7 +96,7 @@ function eval_missing_samples(;
         ct.bandwidth = sample_rate
         ct.frequency = frequency
         ct.sample_rate = sample_rate
-        ct.gain = 30u"dB"
+        ct.gain = 20u"dB"
         ct.gain_mode = false
 
         # Setup receive parameters
@@ -104,7 +104,7 @@ function eval_missing_samples(;
             cr.bandwidth = sample_rate
             cr.frequency = frequency
             cr.sample_rate = sample_rate
-            cr.gain = 30u"dB"
+            cr.gain = 50u"dB"
             cr.gain_mode = false
         end
 
@@ -136,7 +136,9 @@ function eval_missing_samples(;
             if transmitted_samples > num_total_samples
                 return false
             end
-            signals[:, 1] = gen_code(num_samples, gnss_system, sat_prn, sample_rate, code_frequency, phase) .* fullscale ./ 3
+            code = gen_code(num_samples, gnss_system, sat_prn, sample_rate, code_frequency, phase) .* fullscale ./ 3
+            signals[:, 1] = code
+#            signals[:, 2] = code
             copyto!(buff, format.(round.(signals)))
             phase = update_code_phase(gnss_system, num_samples, code_frequency, sample_rate, phase)
             transmitted_samples += num_samples
@@ -159,19 +161,19 @@ function eval_missing_samples(;
 
 #        data_channel1, data_channel2 = tee(reshunked_channel)
 
-#        measurement = collect_single_chunk_at(reshunked_channel, counter_threshold = 1000)
+        measurement = collect_single_chunk_at(reshunked_channel, counter_threshold = 1000)
 
-        sample_shift_stream = correlate_channel(reshunked_channel, gnss_system, sample_rate, sat_prn)
+#        sample_shift_stream = correlate_channel(reshunked_channel, gnss_system, sample_rate, sat_prn)
 
-        reshunked_sample_shifts = rechunk(sample_shift_stream, 2000)
+#        reshunked_sample_shifts = rechunk(sample_shift_stream, 2000)
  
-        missing_samples_data = collect_buffers(reshunked_sample_shifts)
+#        missing_samples_data = collect_buffers(reshunked_sample_shifts)
 
         # Ensure that we're done transmitting as well.
         # This should always be the case, but best to be sure.
         wait(t_tx)
-        missing_samples_data, dma_buffers
-#        measurement, dma_buffers
+#        missing_samples_data, dma_buffers
+        measurement, dma_buffers
     end
 end
 

@@ -63,7 +63,7 @@ function do_txrx(mode::Symbol;
         device_kwargs[:serial] = "18c5241b88485c"
     end
 
-    Device(first(Devices(;device_kwargs...))) do dev
+    Device(Devices(;device_kwargs...)[2]) do dev
         # Get some useful parameters
         format = dev.rx[1].native_stream_format
         fullscale = dev.tx[1].fullscale
@@ -91,7 +91,7 @@ function do_txrx(mode::Symbol;
 #                cr[SoapySDR.GainElement(:LNA)] = 10u"dB"
 #                cr[SoapySDR.GainElement(:TIA)] = 12u"dB"
 #                cr[SoapySDR.GainElement(:PGA)] = 19u"dB"
-                cr.gain = 40u"dB"
+                cr.gain = 50u"dB"
             else
                 # Default everything to absolute quiet
 #                cr[SoapySDR.GainElement(:LNA)] = 0u"dB"
@@ -116,7 +116,7 @@ function do_txrx(mode::Symbol;
 
             if mode ==:tx
                 # If we're actually TX'ing and RX'ing, juice it up
-                ct.gain = 40u"dB"
+                ct.gain = 50u"dB"
             elseif mode == :trf_loopback
                 ct.gain = 40u"dB"
             else
@@ -172,20 +172,13 @@ function do_txrx(mode::Symbol;
             end
         end
 
-        for ct in dev.tx
-            ct[SoapySDR.Setting("CALIBRATE")] = "TRUE"
-        end
-        #        dev.rx[1][SoapySDR.Setting("CALIBRATE")] = "TRUE"
-#        for (c_idx, cr) in enumerate(dev.rx)
-#            cr[SoapySDR.Setting("CALIBRATE")] = "TRUE"
+#        for ct in dev.tx
+#            ct[SoapySDR.Setting("CALIBRATE")] = "5e6"
 #        end
 
-#        dev.tx[1][SoapySDR.Setting("CALIBRATE")] = "TRUE"
-        
-
-        for (c_idx, cr) in enumerate(dev.rx)
-            cr[SoapySDR.Setting("CALIBRATE")] = "TRUE"
-        end
+#        for (c_idx, cr) in enumerate(dev.rx)
+#            cr[SoapySDR.Setting("CALIBRATE")] = "5e6"
+#        end
 
         # Dump an initial INI, showing how the registers are configured here
         if dump_inis
@@ -260,49 +253,49 @@ function make_txrx_plots(iq_data, data_tx; name::String="data", sample_rate)
     plt = plot(real.(data_tx[data_part, 1]); label="re(tx[1])", title="$(name) - Real")
     plot!(plt, real.(iq_data)[data_part, 1]; label="re(rx[1])")
     plot!(plt, real.(iq_data)[data_part, 2]; label="re(rx[2])")
-    savefig(plt, "$(name)_re.png")
+    savefig(plt, "plots/$(name)_re.png")
 
     plt = plot(imag.(data_tx[data_part, 1]); label="im(tx[1])", title="$(name) - Imag")
     plot!(plt, imag.(iq_data)[data_part, 1]; label="im(rx[1])")
     plot!(plt, imag.(iq_data)[data_part, 2]; label="im(rx[2])")
-    savefig(plt, "$(name)_im.png")
+    savefig(plt, "plots/$(name)_im.png")
 
     fft_data_part = (20000:min(20000+15000, size(data_tx,1)))# .+ 120000
 
     p = periodogram(data_tx[fft_data_part, 1], fs = upreferred(sample_rate / 1u"Hz"))
     plt = plot(fftshift(freq(p) / 1e6), fftshift(10 * log10.(power(p))); xlabel="Frequency (MHz)", ylabel = "Power (dB)", title="Periodogram $name transmitted")
-    savefig(plt, "periodogram_$(name)_transmitted.png")
+    savefig(plt, "plots/periodogram_$(name)_transmitted.png")
     p = periodogram(iq_data[fft_data_part, 1], fs = upreferred(sample_rate / 1u"Hz"))
     plt = plot(fftshift(freq(p) / 1e6), fftshift(10 * log10.(power(p))); xlabel="Frequency (MHz)", ylabel = "Power (dB)", title="Periodogram $name channel 1")
-    savefig(plt, "periodogram_$(name)_channel_1.png")
+    savefig(plt, "plots/periodogram_$(name)_channel_1.png")
     p = periodogram(iq_data[fft_data_part, 2], fs = upreferred(sample_rate / 1u"Hz"))
     plt = plot(fftshift(freq(p) / 1e6), fftshift(10 * log10.(power(p))); xlabel="Frequency (MHz)", ylabel = "Power (dB)", title="Periodogram $name channel 2")
-    savefig(plt, "periodogram_$(name)_channel_2.png")
+    savefig(plt, "plots/periodogram_$(name)_channel_2.png")
 end
 
 function full_loopback_suite(;sample_rate, kwargs...)
     @sync begin
         # First, lfsr loopback
-        lfsr_iq, lfsr_tx = do_txrx(:lfsr_loopback; kwargs...)
+        lfsr_iq, lfsr_tx = do_txrx(:lfsr_loopback; sample_rate, kwargs...)
         t_lfsr_plot = @async make_txrx_plots(lfsr_iq, lfsr_tx; sample_rate, name="lfsr_loopback")
 
         # Next, digital loopback
-        digi_iq, digi_tx = do_txrx(:digital_loopback; kwargs...)
+        digi_iq, digi_tx = do_txrx(:digital_loopback; sample_rate, kwargs...)
         wait(t_lfsr_plot)
         t_digi_plot = @async make_txrx_plots(digi_iq, digi_tx; sample_rate, name="digital_loopback")
 
         # Next, TBB loopback
-        tbb_iq, tbb_tx = do_txrx(:tbb_loopback; kwargs...)
+        tbb_iq, tbb_tx = do_txrx(:tbb_loopback; sample_rate, kwargs...)
         wait(t_digi_plot)
         t_tbb_plot = @async make_txrx_plots(tbb_iq, tbb_tx; sample_rate, name="tbb_loopback")
 
         # Next, TRF loopback
-        trf_iq, trf_tx = do_txrx(:trf_loopback; kwargs...)
+        trf_iq, trf_tx = do_txrx(:trf_loopback; sample_rate, kwargs...)
         wait(t_tbb_plot)
         t_trf_plot = @async make_txrx_plots(trf_iq, trf_tx; sample_rate, name="trf_loopback")
 
         # Finally, out over the air
-        tx_iq, tx_tx = do_txrx(:tx; kwargs...)
+        tx_iq, tx_tx = do_txrx(:tx; sample_rate, kwargs...)
         wait(t_trf_plot)
         t_tx_plot = @async make_txrx_plots(tx_iq, tx_tx; sample_rate, name="tx")
     end
