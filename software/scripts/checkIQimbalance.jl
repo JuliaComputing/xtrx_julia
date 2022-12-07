@@ -59,19 +59,22 @@ function do_txrx(mode::Symbol;
     # If we're running on pathfinder, pick a specific device
     device_kwargs = Dict{Symbol,Any}()
     if chomp(String(read(`hostname`))) == "pathfinder"
-        device_kwargs[:driver] = "XTRX"
-        device_kwargs[:serial] = "18c5241b88485c"
+        device_kwargs[:driver] = "XTRXLime"
+        device_kwargs[:serial] = "12cc5241b88485c"
     end
 
-    Device(Devices(;device_kwargs...)[2]) do dev
+    Device(first(Devices(;device_kwargs...))) do dev
         # Get some useful parameters
         format = dev.rx[1].native_stream_format
         fullscale = dev.tx[1].fullscale
 
-        frequency = 1575.00u"MHz"
+        frequency = 1575.42u"MHz"
 
         # Setup transmission/recieve parameters
         for (c_idx, cr) in enumerate(dev.rx)
+            cr.bandwidth = sample_rate
+            cr.sample_rate = sample_rate
+            cr.frequency = frequency
             if mode == :tbb_loopback
                 # For TBB loopback, we really don't need to be that loud
 #                cr[SoapySDR.GainElement(:LNA)] = 0u"dB"
@@ -108,12 +111,12 @@ function do_txrx(mode::Symbol;
             else
                 cr.antenna = :LB1
             end
-
-            cr.frequency = frequency
         end
 
         for ct in dev.tx
-
+            ct.bandwidth = sample_rate
+            ct.sample_rate = sample_rate
+            ct.frequency = frequency
             if mode ==:tx
                 # If we're actually TX'ing and RX'ing, juice it up
                 ct.gain = 50u"dB"
@@ -123,18 +126,6 @@ function do_txrx(mode::Symbol;
                 # Otherwise, keep quiet
                 ct.gain = 30u"dB"
             end
-
-            ct.frequency = frequency
-        end
-
-        for (c_idx, cr) in enumerate(dev.rx)
-            cr.sample_rate = sample_rate
-            cr.bandwidth = sample_rate
-        end
-
-        for ct in dev.tx
-            ct.sample_rate = sample_rate
-            ct.bandwidth = sample_rate
         end
 
         # Do a quick FPGA loopback sanity check for these clocking values
@@ -172,13 +163,13 @@ function do_txrx(mode::Symbol;
             end
         end
 
-#        for ct in dev.tx
-#            ct[SoapySDR.Setting("CALIBRATE")] = "5e6"
-#        end
+        for ct in dev.tx
+            ct[SoapySDR.Setting("CALIBRATE")] = "5e6"
+        end
 
-#        for (c_idx, cr) in enumerate(dev.rx)
-#            cr[SoapySDR.Setting("CALIBRATE")] = "5e6"
-#        end
+        for (c_idx, cr) in enumerate(dev.rx)
+            cr[SoapySDR.Setting("CALIBRATE")] = "5e6"
+        end
 
         # Dump an initial INI, showing how the registers are configured here
         if dump_inis

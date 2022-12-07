@@ -149,7 +149,10 @@ SoapyXTRX::SoapyXTRX(const ConnectionHandle &handle, const SoapySDR::Kwargs &arg
     writeSetting("FPGA_RX_DELAY", "16");
     writeSetting("FPGA_TX_DELAY", "16");
 
-    lms7Device = LMS7_Device::CreateDevice(handle);
+    ConnectionHandle xtrx_handle;
+    xtrx_handle.index = stoi(path.substr(13));
+
+    lms7Device = LMS7_Device::CreateDevice(xtrx_handle);
     if (lms7Device == nullptr) throw std::runtime_error(
         "Failed to make connection with '" + handle.serialize() + "'");
 
