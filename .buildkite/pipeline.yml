@@ -177,25 +177,32 @@ steps:
       echo "--- litepcie_util scratch_test"
       ./build/bin/litepcie_util scratch_test
 
-      echo "--- litepcie_util dma_test for 10s"
+      echo "--- litepcie_util dma_test for 10s - run #1"
       # Fail the build if we do not transfer at least 100k buffers, or if we get >1000 errors.
       ./build/bin/litepcie_util dma_test -a -w 12 -t 10000 -b 100000 -x 1000
       ./build/bin/litepcie_util csr_dump > litepcie_util_tests/internal-0.csr.ini
+
+      echo "--- litepcie_util dma_test for 10s - run #2"
       ./build/bin/litepcie_util dma_test -a -w 12 -t 10000 -b 100000 -x 1000
       ./build/bin/litepcie_util csr_dump > litepcie_util_tests/internal-1.csr.ini
 
-      # Try again, but this time after a reset
+      echo "--- reset"
       ./test/reset.sh
+
+      echo "--- litepcie_util dma_test for 10s - run #3"
       ./build/bin/litepcie_util dma_test -a -w 12 -t 10000 -b 100000 -x 1000
       ./build/bin/litepcie_util csr_dump > litepcie_util_tests/internal-2.csr.ini
 
-      echo "--- litepcie_util external dma_test for 10s"
+      echo "--- litepcie_util external dma_test for 10s - run #1"
       ./build/bin/litepcie_util lms_set_tx_rx_loopback 1
       ./build/bin/litepcie_util dma_test -e -w 12 -t 10000
       ./build/bin/litepcie_util csr_dump > litepcie_util_tests/external-0.csr.ini
 
-      # Try again, but this time after a reset
+      
+      echo "--- reset"
       ./test/reset.sh
+
+      echo "--- litepcie_util external dma_test for 10s - run #2"
       ./build/bin/litepcie_util lms_set_tx_rx_loopback 1
       ./build/bin/litepcie_util dma_test -e -w 12 -t 10000
       ./build/bin/litepcie_util csr_dump > litepcie_util_tests/external-1.csr.ini
