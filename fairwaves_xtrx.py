@@ -264,7 +264,7 @@ def main():
     for run in range(2):
         prepare = (run == 0)
         build   = ((run == 1) & args.build)
-        soc = BaseSoC(cpu_firmware=None if prepare else "firmware/firmware.bin", nonpro=args.nonpro, address_width=args.address_width)
+        soc = BaseSoC(cpu_firmware=None if prepare else "firmware/firmware.bin", nonpro=args.nonpro, address_width=int(args.address_width))
         builder = Builder(soc, csr_csv="csr.csv")
         builder.build(run=build)
         if prepare:
