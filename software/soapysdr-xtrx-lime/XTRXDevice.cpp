@@ -109,10 +109,16 @@ SoapyXTRX::SoapyXTRX(const ConnectionHandle &handle, const SoapySDR::Kwargs &arg
         // if path is not present, then findXTRX had zero devices enumerated
         throw std::runtime_error("No LitePCIe devices found!");
     }
+
     std::string path = args.at("path");
-    _fd = open(path.c_str(), O_RDWR);
-    if (_fd < 0)
-        throw std::runtime_error("SoapyXTRX(): failed to open " + path);
+    ConnectionHandle xtrx_handle;
+    xtrx_handle.index = stoi(path.substr(13));
+
+    lms7Device = LMS7_Device::CreateDevice(xtrx_handle);
+    if (lms7Device == nullptr) throw std::runtime_error(
+        "Failed to make connection with '" + handle.serialize() + "'");
+
+    _fd = lms7Device->GetConnection()->getFileDescriptor();
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getXTRXSerial(_fd).c_str());
 
@@ -148,13 +154,6 @@ SoapyXTRX::SoapyXTRX(const ConnectionHandle &handle, const SoapySDR::Kwargs &arg
     writeSetting("FPGA_RX_PATTERN", "0");
     writeSetting("FPGA_RX_DELAY", "16");
     writeSetting("FPGA_TX_DELAY", "16");
-
-    ConnectionHandle xtrx_handle;
-    xtrx_handle.index = stoi(path.substr(13));
-
-    lms7Device = LMS7_Device::CreateDevice(xtrx_handle);
-    if (lms7Device == nullptr) throw std::runtime_error(
-        "Failed to make connection with '" + handle.serialize() + "'");
 
     // set clock to Reference Clock Source
     if (args.count("clock") == 0) {
@@ -364,7 +363,7 @@ SoapyXTRX::~SoapyXTRX(void) {
     }
     delete lms7Device;
 
-    LMS7002M_destroy(_lms);
+//    LMS7002M_destroy(_lms);
     close(_fd);
 }
 
