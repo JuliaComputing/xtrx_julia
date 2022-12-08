@@ -1,6 +1,6 @@
 using LibSigflow, SoapySDR, Unitful
 
-export XTRXTestConfig, XTRXChannelParameters, XTRXRxFilterConfig, XTRXTxFilterConfig
+export XTRXTestConfig, XTRXChannelParameters, XTRXRxFilterConfig, XTRXTxFilterConfig, XTRXLoopbackMode
 export run_test
 
 ## This file contains helper methods for building XTRX tests.
@@ -39,19 +39,22 @@ end
 
 Set the channel parameters such as carrier frequency, samplerate, filter bandwidth, etc...
 """
-struct XTRXChannelParameters
+struct XTRXChannelParameters{GS<:Union{Nothing,<:Dict{Symbol,Unitful.Gain}}}
     frequency::Unitful.Frequency
     samplerate::Unitful.Frequency
     bandwidth::Unitful.Frequency
-    gains::Dict{Symbol,Unitful.Gain}
+    gains::GS
+    gain::Unitful.Gain
     antenna::Symbol
 
-    function XTRXChannelParameters(frequency, samplerate, bandwidth, gains, antenna)
-        return new(
+    function XTRXChannelParameters(frequency, samplerate, bandwidth, gains, gain, antenna)
+        gain_temp = isnothing(gains) ? gains : Dict(Symbol(k) => upreferred(v) for (k, v) in gains)
+        return new{typeof(gains)}(
             upreferred(frequency),
             upreferred(samplerate),
             upreferred(bandwidth),
-            Dict(Symbol(k) => upreferred(v) for (k, v) in gains),
+            gain_temp,
+            upreferred(gain),
             Symbol(antenna),
         )
     end
@@ -61,24 +64,30 @@ end
 function default_rx_parameters(;frequency = 1u"GHz",
                                 samplerate = 10u"MHz",
                                 bandwidth = 10u"MHz",
-                                gains = Dict(:LNA => 30u"dB", :TIA => 9u"dB", :PGA => 6u"dB"),
+                                gains = nothing, #Dict(:LNA => 30u"dB", :TIA => 9u"dB", :PGA => 6u"dB"),
+                                gain = 40u"dB",
                                 antenna = :LNAW)
-    return XTRXChannelParameters(frequency, samplerate, bandwidth, gains, antenna)
+    return XTRXChannelParameters(frequency, samplerate, bandwidth, gains, gain, antenna)
 end
 function default_tx_parameters(;frequency = 1u"GHz",
                                 samplerate = 10u"MHz",
                                 bandwidth = 10u"MHz",
-                                gains = Dict(:PAD => 0u"dB"),
+                                gains = nothing, #Dict(:PAD => 0u"dB"),
+                                gain = 30u"dB",
                                 antenna = :BAND1)
-    return XTRXChannelParameters(frequency, samplerate, bandwidth, gains, antenna)
+    return XTRXChannelParameters(frequency, samplerate, bandwidth, gains, gain, antenna)
 end
 
 function configure_channel!(channel::SoapySDR.Channel, params::XTRXChannelParameters)
     channel.frequency = params.frequency
     channel.sample_rate = params.samplerate
     channel.bandwidth = params.bandwidth
-    for (gain_name, gain_val) in params.gains
-        channel[SoapySDR.GainElement(gain_name)] = gain_val
+    if !isnothing(params.gains)
+        for (gain_name, gain_val) in params.gains
+            channel[SoapySDR.GainElement(gain_name)] = gain_val
+        end
+    else
+        channel.gain = params.gain
     end
     channel.antenna = params.antenna
 end
