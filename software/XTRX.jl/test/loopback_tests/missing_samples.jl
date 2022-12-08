@@ -239,3 +239,5 @@ function run_tests()
 end
 
 end # module
+
+isinteractive() || MissingSamplesTest.run_tests()
