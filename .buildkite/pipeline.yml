@@ -203,6 +203,12 @@ steps:
       for f in *.png; do
         buildkite-agent artifact upload $${f}
       done
+
+      echo "--- Run missing_samples.jl --full"
+      julia --project --threads auto software/XTRX.jl/test/loopback_tests/missing_samples.jl
+      for f in sample_shifts/*.png; do
+        buildkite-agent artifact upload $${f}
+      done
     agents:
       os: "linux"
       queue: "triad"
