@@ -28,8 +28,7 @@ $(SOAPYLMS7_LIB): $(SOAPYSDR_LIB) $(LIBUSB_LIB) $(LITEPCIE_LIB) $(NVCC) limesuit
 	rm -rf limesuite/build/build
 	mkdir -p limesuite/build/build
 	-# We must provide a few helpful hints here; we redirect to our `libusb`, and
-	cmake --trace-expand \
-		  -DCMAKE_PREFIX_PATH=$(SOAPYSDR_PREFIX) \
+	cmake -DCMAKE_PREFIX_PATH=$(SOAPYSDR_PREFIX) \
 		  -DLIBUSB_1_INCLUDE_DIRS=$(LIBUSB_PREFIX)/include/libusb-$(LIBUSB_MAJMIN) \
 		  -DLIBUSB_1_LIBRARIES=$(LIBUSB_LIB) \
 		  -DLIBUSB_1_FOUND=TRUE \
