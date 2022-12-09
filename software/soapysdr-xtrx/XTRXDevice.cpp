@@ -73,7 +73,8 @@ void dma_set_loopback(int fd, bool loopback_enable) {
 }
 
 SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
-    : _fd(-1), _lms(NULL), _refClockRate(26e6) {
+    : _fd(-1), _lms(NULL), _refClockRate(26e6),
+     _newGainBehavior(true) {
     LMS7_set_log_handler(&customLogHandler);
     LMS7_set_log_level(LMS7_TRACE);
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyXTRX initializing...");
@@ -514,79 +515,84 @@ std::vector<std::string> SoapyXTRX::listGains(const int direction,
     return gains;
 }
 
-void SoapyXTRX::setGain(const int direction, const size_t channel, const double value) {
+void SoapyXTRX::setGain(const int direction, const size_t channel,
+                        const double value) {
 
     SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyXTRX::setGain(%s, ch%d, %f dB)",
                    dir2Str(direction), channel, value);
 
-    if (direction == SOAPY_SDR_TX)
-    {
+    if (direction == SOAPY_SDR_TX) {
         // Setting the TX gain using a single value optimized for the LMS7002
         // hasn't been implemented yet.
         // Let's default to the standard SoapySDR version.
         SoapySDR::Device::setGain(direction, channel, value);
-    }
-    else
-    {
+    } else {
         std::lock_guard<std::mutex> lock(_mutex);
-#ifdef NEW_GAIN_BEHAVIOUR
-        const int maxGain = 62; // gain table size
-#else
-        const int maxGain = 74;
-#endif
-        auto value_offset = value + 12;           //pga offset
-        if (value_offset >= maxGain) //do not exceed gain table index
-            value_offset = maxGain-1;
-        else if (value_offset < 0)
+        int maxGain;
+        if (_newGainBehavior) {
+            maxGain = 62; // gain table size
+        } else {
+            maxGain = 74;
+        }
+
+        auto value_offset = value + 12; // pga offset
+        if (value_offset >= maxGain) {  // do not exceed gain table index
+            value_offset = maxGain - 1;
+        } else if (value_offset < 0) {
             value_offset = 0;
+        }
         unsigned lna = 0, pga = 0, tia = 0;
-#ifdef NEW_GAIN_BEHAVIOUR
-        //LNA table
-        const unsigned lnaTbl[maxGain] = {
+
+        // LNA table
+        const unsigned newGainlnaTbl[62] = {
             0,  0,  0,  1,  1,  1,  2,  2,  2,  3,  3,  3,  4,  4,  4,  5,
             5,  5,  6,  6,  6,  7,  7,  7,  8,  9,  10, 11, 11, 11, 11, 11,
             11, 11, 11, 11, 11, 11, 11, 11, 12, 13, 14, 14, 14, 14, 14, 14,
-            14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14
-        };
-        //PGA table
-        const unsigned pgaTbl[maxGain] = {
+            14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14};
+        // PGA table
+        const unsigned newGainpgaTbl[62] = {
             0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,
             1,  2,  0,  1,  2,  0,  1,  2,  0,  0,  0,  0,  1,  2,  3,  4,
             5,  6,  7,  8,  9,  10, 11, 12, 12, 12, 12, 13, 14, 15, 16, 17,
-            18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31
-        };
-#else
-        //LNA table
-        const unsigned lnaTbl[maxGain] = {
-            0,  0,  0,  1,  1,  1,  2,  2,  2,  3,  3,  3,  4,  4,  4,  5,
-            5,  5,  6,  6,  6,  7,  7,  7,  8,  9,  10, 11, 11, 11, 11, 11,
-            11, 11, 11, 11, 11, 11, 11, 11, 12, 13, 14, 14, 14, 14, 14, 14,
-            14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
-            14, 14, 14, 14, 14, 14, 14, 14, 14, 14
-        };
-        //PGA table
-        const unsigned pgaTbl[maxGain] = {
-            0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,
-            1,  2,  0,  1,  2,  0,  1,  2,  0,  0,  0,  0,  1,  2,  3,  4,
-            5,  6,  7,  8,  9,  10, 11, 12, 12, 12, 12, 4,  5,  6,  7,  8,
-            9,  10, 11, 12, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
-            22, 23, 24, 25, 26, 27, 28, 29, 30, 31
-        };
-#endif
-        lna = lnaTbl[int(value_offset+0.5)];
-        pga = pgaTbl[int(value_offset+0.5)];
+            18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
 
-#ifdef NEW_GAIN_BEHAVIOUR
-        if(value_offset > 0) tia = 1;
-#else
-        //TIA table
-        if (value_offset > 51) tia = 2;
-        else if (value_offset > 42) tia = 1;
-#endif
+        // LNA table
+        const unsigned lnaTbl[74] = {
+            0,  0,  0,  1,  1,  1,  2,  2,  2,  3,  3,  3,  4,  4,  4,
+            5,  5,  5,  6,  6,  6,  7,  7,  7,  8,  9,  10, 11, 11, 11,
+            11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 12, 13, 14, 14, 14,
+            14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
+            14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14};
+        // PGA table
+        const unsigned pgaTbl[74] = {
+            0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,
+            0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  0,  0,  0,  1,  2,
+            3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 12, 12, 12, 4,  5,
+            6,  7,  8,  9,  10, 11, 12, 10, 11, 12, 13, 14, 15, 16, 17,
+            18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
 
-        auto actualLNA = LMS7002M_rfe_set_lna_dist(_lms, ch2LMS(channel), lna+1);
-        auto actualTIA = LMS7002M_rfe_set_tia_dist(_lms, ch2LMS(channel), tia+1);
-        auto actualPGA = LMS7002M_rbb_set_pga_dist(_lms, ch2LMS(channel), pga);
+        if (_newGainBehavior) {
+            lna = newGainlnaTbl[int(value_offset + 0.5)];
+            pga = newGainpgaTbl[int(value_offset + 0.5)];
+        } else {
+            lna = lnaTbl[int(value_offset + 0.5)];
+            pga = pgaTbl[int(value_offset + 0.5)];
+        }
+
+        if (_newGainBehavior) {
+            if (value_offset > 0)
+              tia = 1;
+        } else {
+            // TIA table
+            if (value_offset > 51)
+              tia = 2;
+            else if (value_offset > 42)
+              tia = 1;
+        }
+
+        LMS7002M_rfe_set_lna_dist(_lms, ch2LMS(channel), lna + 1);
+        LMS7002M_rfe_set_tia_dist(_lms, ch2LMS(channel), tia + 1);
+        LMS7002M_rbb_set_pga_dist(_lms, ch2LMS(channel), pga);
     }
 }
 
@@ -1177,7 +1183,9 @@ std::string SoapyXTRX::readSetting(const std::string &key) const
                 + " TX hw count: " + std::to_string(_tx_stream.hw_count)
                 + " TX sw count: " + std::to_string(_tx_stream.sw_count)
                 + " TX user count: " + std::to_string(_tx_stream.user_count);
-    } else
+    } else if (key == "NEW_GAIN_BEHAVIOR")
+        return _newGainBehavior ? "TRUE" : "FALSE";
+    else
         throw std::runtime_error("SoapyXTRX::readSetting(" + key + ") unknown key");
 }
 
@@ -1366,6 +1374,8 @@ void SoapyXTRX::writeSetting(const std::string &key, const std::string &value) {
         vctcxo_dac_set(std::stoi(value));
     } else if (key == "LITEX_DUMP_INI") {
         dump_litex_regs(value);
+    } else if (key == "NEW_GAIN_BEHAVIOR") {
+        _newGainBehavior = (value == "TRUE");
     } else
         throw std::runtime_error("SoapyXTRX::writeSetting(" + key + ", " +
                                  value + ") unknown key");
