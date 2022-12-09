@@ -204,6 +204,9 @@ steps:
         buildkite-agent artifact upload $${f}
       done
 
+      echo "--- Reset device (via remove + rescan)"
+      ./test/reset.sh -r
+
       echo "--- Run missing_samples.jl --full"
       julia --project --threads auto software/XTRX.jl/test/loopback_tests/missing_samples.jl
       for f in sample_shifts/*.png; do
