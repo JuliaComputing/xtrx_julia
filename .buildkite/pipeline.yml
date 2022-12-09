@@ -75,7 +75,7 @@ steps:
       make -C software soapysdr -j$$(nproc) SOAPYSDR_PREFIX=$$(pwd)/build/soapysdr
 
       echo "--- Build LimeSuite driver library"
-      make -C software limesuite -j$$(nproc) SOAPYSDR_PREFIX=$$(pwd)/build/soapysdr
+      make -C software limesuite -j$$(nproc) SOAPYSDR_PREFIX=$$(pwd)/build/soapysdr LIBUSB_PREFIX=$$(pwd)/build/libusb
 
       echo "--- Bundle SoapySDR"
       tar -czvf soapysdr.tar.gz -C build/soapysdr .
