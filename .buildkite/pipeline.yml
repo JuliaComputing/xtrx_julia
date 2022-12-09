@@ -75,10 +75,12 @@ steps:
       make -C software soapysdr -j$$(nproc) SOAPYSDR_PREFIX=$$(pwd)/build/soapysdr
 
       echo "--- Build LimeSuite driver library"
+      ls -la $$(pwd)/build
+      ls -la $$(pwd)/build/bin
       ls -la $$(pwd)/software
       ls -la $$(pwd)/software/nvidia-cuda
       ls -la $$(pwd)/software/nvidia-cuda/bin
-      make -C software limesuite -j$$(nproc) SOAPYSDR_PREFIX=$$(pwd)/build/soapysdr CUDA_PREFIX=$$(pwd)/software/nvidia-cuda
+      make -C software limesuite -j$$(nproc) SOAPYSDR_PREFIX=$$(pwd)/build/soapysdr CUDA_PREFIX=$$(pwd)/build
 
       echo "--- Bundle SoapySDR"
       tar -czvf soapysdr.tar.gz -C build/soapysdr .
