@@ -80,7 +80,7 @@ steps:
       ls -la $$(pwd)/software
       ls -la $$(pwd)/software/nvidia-cuda
       ls -la $$(pwd)/software/nvidia-cuda/bin
-      make -C software limesuite -j$$(nproc) SOAPYSDR_PREFIX=$$(pwd)/build/soapysdr CUDA_PREFIX=$$(pwd)/build
+      make -C software limesuite -j$$(nproc) SOAPYSDR_PREFIX=$$(pwd)/build/soapysdr
 
       echo "--- Bundle SoapySDR"
       tar -czvf soapysdr.tar.gz -C build/soapysdr .
