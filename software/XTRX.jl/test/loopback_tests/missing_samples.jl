@@ -4,7 +4,7 @@ module MissingSamplesTest
 ENV["GKSwstype"] = "100"
 
 # Force very verbose driver
-ENV["SOAPY_SDR_LOG_LEVEL"]="DEBUG"
+#ENV["SOAPY_SDR_LOG_LEVEL"]="DEBUG"
 
 using SoapySDR, Unitful, LibSigflow, Statistics, GNSSSignals, FFTW, LinearAlgebra, XTRX, Printf, Test, Plots
 
@@ -103,6 +103,7 @@ function eval_missing_samples(;
     max_tries = 10
     counter = 0
     for i in 1:max_tries
+#        run(`./test/reset.sh -r`)
         xflow_stats = XTRX.run_test(config) do dev, s_tx, s_rx
 
             format = first(dev.rx).native_stream_format
