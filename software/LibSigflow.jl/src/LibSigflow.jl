@@ -181,6 +181,91 @@ function stream_data(s_rx::SoapySDR.Stream{T}, end_condition::Union{Integer,Base
 end
 
 """
+    stream_data(s_rx::SoapySDR.Stream, end_condition::Union{Integer,Event})
+
+Returns a `Channel` which will yield buffers of data to be processed of size `s_rx.mtu`.
+Starts an asynchronous task that does the reading from the stream, until the requested
+number of samples are read, or the given `Event` is notified.
+"""
+function stream_data(s_rx1::SoapySDR.Stream{T}, s_rx2::SoapySDR.Stream{T},
+                     end_condition::Union{Integer,Base.Event};
+                     leadin_buffers::Integer = 16,
+                     kwargs...) where {T <: Number}
+    # Wrapper to activate/deactivate `s_rx`
+    num_samples = max(s_rx1.mtu, s_rx2.mtu)
+    num_channels = s_rx1.nchannels + s_rx2.channels
+    wrapper = (f) -> begin
+        buff = Matrix{T}(undef, num_samples, num_channels)
+
+        # Let the stream come online for a bit
+        SoapySDR.activate!([s_rx1, s_rx2]) do
+            while leadin_buffers > 0
+                read!(s_rx1, split_matrix(view(buff, :, 1:s_rx1.nchannels)))
+                read!(s_rx2, split_matrix(view(buff, :, s_rx1.nchannels + 1:num_channels)))
+                leadin_buffers -= 1
+            end
+
+            # Invoke the rest of `generate_stream()`
+            f()
+        end
+    end
+
+    # Read streams until we read the number of samples, or the given event
+    # is triggered
+    buff_idx = 0
+    return generate_stream(num_samples, num_channels; wrapper, T, kwargs...) do buff
+        if isa(end_condition, Integer)
+            if buff_idx*num_samples >= end_condition
+                return false
+            end
+        else
+            if end_condition.set
+                return false
+            end
+        end
+
+        flags = Ref{Int}(0)
+        try
+            read!(s_rx1, split_matrix(view(buff, :, 1:s_rx1.nchannels)); flags, timeout=0.9u"s", throw_error = true)
+        catch e
+            if e isa SoapySDR.SoapySDRDeviceError
+                if e.status == SoapySDR.SOAPY_SDR_OVERFLOW
+                    _num_overflows[] += 1
+                    print("O1")
+                elseif e.status == SoapySDR.SOAPY_SDR_TIMEOUT
+                    print("Tᵣ1")
+                else
+                    print("Eᵣ1")
+                end
+            else
+                rethrow(e)
+            end
+        end
+
+        flags = Ref{Int}(0)
+        try
+            read!(s_rx2, split_matrix(view(buff, :, s_rx1.nchannels + 1:num_channels)); flags, timeout=0.9u"s", throw_error = true)
+        catch e
+            if e isa SoapySDR.SoapySDRDeviceError
+                if e.status == SoapySDR.SOAPY_SDR_OVERFLOW
+                    _num_overflows[] += 1
+                    print("O2")
+                elseif e.status == SoapySDR.SOAPY_SDR_TIMEOUT
+                    print("Tᵣ2")
+                else
+                    print("Eᵣ2")
+                end
+            else
+                rethrow(e)
+            end
+        end
+
+        buff_idx += 1
+        return true
+    end
+end
+
+"""
     stream_data(s_tx, in::Channel)
 
 Feed data from a `Channel` out onto the airwaves via a given `SoapySDR.Stream`.

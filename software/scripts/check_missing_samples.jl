@@ -177,3 +177,140 @@ function eval_missing_samples(;
         measurement, missing_samples_data, dma_buffers
     end
 end
+
+function eval_missing_samples_over_multiple_devices(;
+    frequency = 1565.42u"MHz",
+    sample_rate = 5e6u"Hz",
+    run_time = 10u"s",
+    gnss_system = GPSL1(),
+    count_dma_buffers = false
+)
+    num_samples_to_track = Int(upreferred(sample_rate * 1u"ms"))
+
+    device_kwargs1 = Dict{Symbol,Any}()
+    if chomp(String(read(`hostname`))) == "pathfinder"
+        device_kwargs1[:driver] = "XTRX"
+        device_kwargs1[:serial] = "12cc5241b88485c"
+    end
+    device_kwargs2 = Dict{Symbol,Any}()
+    if chomp(String(read(`hostname`))) == "pathfinder"
+        device_kwargs2[:driver] = "XTRX"
+        device_kwargs2[:serial] = "30c5241b884854"
+    end
+
+    dev1 = Device(first(Devices(;device_kwargs1...)))
+    dev2 = Device(first(Devices(;device_kwargs2...)))
+    try
+        format = dev1.rx[1].native_stream_format
+        fullscale = dev1.tx[1].fullscale
+
+        # Setup transmitter parameters
+        ct = dev1.tx[1]
+        ct.bandwidth = sample_rate
+        ct.frequency = frequency
+        ct.sample_rate = sample_rate
+        ct.gain = 50u"dB"
+        ct.gain_mode = false
+
+        # Setup receive parameters
+        for cr in dev1.rx
+            cr.bandwidth = sample_rate
+            cr.frequency = frequency
+            cr.sample_rate = sample_rate
+            cr.gain = 50u"dB"
+            cr.gain_mode = false
+        end
+
+        for cr in dev2.rx
+            cr.bandwidth = sample_rate
+            cr.frequency = frequency
+            cr.sample_rate = sample_rate
+            cr.gain = 50u"dB"
+            cr.gain_mode = false
+        end
+
+        stream_rx1 = SoapySDR.Stream(format, dev1.rx)
+        stream_tx = SoapySDR.Stream(format, dev1.tx)
+        stream_rx2 = SoapySDR.Stream(format, dev2.rx)
+
+        dma_buffers = (
+            rx_hw_count = Int[],
+            rx_sw_count = Int[],
+            rx_user_count = Int[],
+            tx_hw_count = Int[],
+            tx_sw_count = Int[],
+            tx_user_count = Int[],
+        )
+
+        sat_prn = 34
+        code_frequency = get_code_frequency(gnss_system)
+
+        num_samples = stream_tx.mtu
+        signals = zeros(num_samples, stream_tx.nchannels)
+        num_total_samples = Int(upreferred(sample_rate * run_time))
+
+        # Construct streams
+        phase = 0.0
+        tx_go = Base.Event()
+        transmitted_samples = 0
+        c_tx = generate_stream(num_samples, stream_tx.nchannels; T=format) do buff
+            if transmitted_samples > num_total_samples
+                return false
+            end
+            code = gen_code(num_samples, gnss_system, sat_prn, sample_rate, code_frequency, phase) .* fullscale ./ 3
+            signals[:, 1] = code
+#            signals[:, 2] = code
+            copyto!(buff, format.(round.(signals)))
+            phase = update_code_phase(gnss_system, num_samples, code_frequency, sample_rate, phase)
+            transmitted_samples += num_samples
+            if count_dma_buffers
+                push!(dma_buffers.rx_hw_count, parse(Int, dev[SoapySDR.Setting("DMA_BUFFER_RX_HW_COUNT")]))
+                push!(dma_buffers.rx_sw_count, parse(Int, dev[SoapySDR.Setting("DMA_BUFFER_RX_SW_COUNT")]))
+                push!(dma_buffers.rx_user_count, parse(Int, dev[SoapySDR.Setting("DMA_BUFFER_RX_USER_COUNT")]))
+                push!(dma_buffers.tx_hw_count, parse(Int, dev[SoapySDR.Setting("DMA_BUFFER_TX_HW_COUNT")]))
+                push!(dma_buffers.tx_sw_count, parse(Int, dev[SoapySDR.Setting("DMA_BUFFER_TX_SW_COUNT")]))
+                push!(dma_buffers.tx_user_count, parse(Int, dev[SoapySDR.Setting("DMA_BUFFER_TX_USER_COUNT")]))
+            end
+            return true
+        end
+        t_tx = stream_data(stream_tx, tripwire(c_tx, tx_go))
+
+        # RX reads the buffers in, and pushes them onto `iq_data`
+        samples_channel = flowgate(stream_data(stream_rx1, stream_rx2, num_total_samples; leadin_buffers=0), tx_go)
+
+        reshunked_channel = rechunk(samples_channel, num_samples_to_track)
+
+        data_channel1, data_channel2 = tee(reshunked_channel)
+
+        measurement = collect_single_chunk_at(data_channel1, counter_threshold = 1000) # After 1000 ms
+
+        sample_shift_stream = correlate_channel(data_channel2, gnss_system, sample_rate, sat_prn)
+
+        reshunked_sample_shifts = rechunk(sample_shift_stream, 2000)
+ 
+        missing_samples_data = collect_buffers(reshunked_sample_shifts)
+
+        # Ensure that we're done transmitting as well.
+        # This should always be the case, but best to be sure.
+        wait(t_tx)
+#        missing_samples_data, dma_buffers
+        measurement, missing_samples_data, dma_buffers
+    finally
+        finalize(dev1)
+        finalize(dev2)
+    end
+end
+
+function collect_single_chunk_at(in::MatrixSizedChannel{T}; counter_threshold::Int = 1000) where {T <: Number}
+    buffs = Matrix{T}(undef, in.num_samples, in.num_antenna_channels)
+    counter = 0
+    Base.errormonitor(Threads.@spawn begin 
+        consume_channel(in) do buff
+            if counter == counter_threshold
+                buffs .= buff
+            end
+            counter += 1
+        end
+    end)
+    return buffs
+end
