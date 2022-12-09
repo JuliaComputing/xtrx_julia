@@ -18,7 +18,7 @@ function eval_gain_and_phase_mism(;
 
     device_kwargs = Dict{Symbol,Any}()
     if chomp(String(read(`hostname`))) == "pathfinder"
-        device_kwargs[:driver] = "XTRX"
+        device_kwargs[:driver] = "XTRXLime"
         device_kwargs[:serial] = "12cc5241b88485c"
     end
 
@@ -32,7 +32,7 @@ function eval_gain_and_phase_mism(;
         ct.bandwidth = sample_rate
         ct.frequency = frequency
         ct.sample_rate = sample_rate
-        ct.gain = 30u"dB"
+        ct.gain = 50u"dB"
         ct.gain_mode = false
 
         # Setup receive parameters
@@ -43,7 +43,8 @@ function eval_gain_and_phase_mism(;
             # Gain does not seem to have an effect with BladeRF
             # Even if gain_mode is set to false
             # cr.gain = gain
-            cr.gain_mode = true
+            ct.gain = 50u"dB"
+            cr.gain_mode = false
         end
 
         stream_rx = SoapySDR.Stream(format, dev.rx)
