@@ -74,11 +74,17 @@ steps:
       echo "--- Build SoapySDR"
       make -C software soapysdr -j$$(nproc) SOAPYSDR_PREFIX=$$(pwd)/build/soapysdr
 
+      echo "--- Build LimeSuite driver library"
+      make -C software limesuite -j$$(nproc) SOAPYSDR_PREFIX=$$(pwd)/build/soapysdr
+
       echo "--- Bundle SoapySDR"
       tar -czvf soapysdr.tar.gz -C build/soapysdr .
 
       echo "--- Build SoapySDR-XTRX plugin"
       make -C software soapysdr-xtrx -j$$(nproc) SOAPYSDR_XTRX_PREFIX=$$(pwd)/build/soapysdr-xtrx
+
+      echo "--- Build SoapySDR-XTRX-Lime plugin"
+      make -C software soapysdr-xtrx-lime -j$$(nproc) SOAPYSDR_XTRX_PREFIX=$$(pwd)/build/soapysdr-xtrx
 
       echo "--- Bundle SoapySDR-XTRX"
       tar -czvf soapysdr-xtrx.tar.gz -C build/soapysdr-xtrx .

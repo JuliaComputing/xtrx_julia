@@ -229,7 +229,7 @@ function run_tests()
         mkpath(out_dir)
         for loopback_mode in (XTRX.NoLoopback,)#(XTRX.DigitalLoopback, XTRX.TBBLoopback, XTRX.TRFLoopback)
             @testset "$(string(loopback_mode))" begin
-                for frequency in (1u"GHz",),
+                for frequency in (1.575u"GHz",),
                     samplerate in (5e6u"Hz",)# 4u"MHz", 10u"MHz", 20u"MHz")
                     # Run the test, failures will result in a picture upload
                     @test eval_missing_samples(;frequency, samplerate, loopback_mode, out_dir)
