@@ -384,6 +384,9 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
     LMS7002M_t *_lms;
     double _refClockRate;
 
+    // This selects the gain distirbution algorithm when set via a scalar
+    bool _newGainBehavior;
+
     // calibration data
     std::vector<std::map<std::string, std::string>> _calData;
 
