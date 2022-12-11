@@ -85,6 +85,7 @@ function eval_missing_samples(;
         device_kwargs[:driver] = "XTRX"
         device_kwargs[:serial] = "12cc5241b88485c"
     end
+    device_kwargs[:driver] = "XTRXLime"
 
     Device(first(Devices(;device_kwargs...))) do dev
 
@@ -104,7 +105,7 @@ function eval_missing_samples(;
             cr.bandwidth = sample_rate
             cr.frequency = frequency
             cr.sample_rate = sample_rate
-            cr.gain = 50u"dB"
+            cr.gain = 80u"dB"
             cr.gain_mode = false
         end
 
@@ -137,8 +138,8 @@ function eval_missing_samples(;
                 return false
             end
             code = gen_code(num_samples, gnss_system, sat_prn, sample_rate, code_frequency, phase) .* fullscale ./ 3
-            signals[:, 1] = code
-#            signals[:, 2] = code
+#            signals[:, 1] = code
+            signals[:, 2] = code
             copyto!(buff, format.(round.(signals)))
             phase = update_code_phase(gnss_system, num_samples, code_frequency, sample_rate, phase)
             transmitted_samples += num_samples
@@ -175,18 +176,4 @@ function eval_missing_samples(;
 #        missing_samples_data, dma_buffers
         measurement, missing_samples_data, dma_buffers
     end
-end
-
-function collect_single_chunk_at(in::MatrixSizedChannel{T}; counter_threshold::Int = 1000) where {T <: Number}
-    buffs = Matrix{T}(undef, in.num_samples, in.num_antenna_channels)
-    counter = 0
-    Base.errormonitor(Threads.@spawn begin 
-        consume_channel(in) do buff
-            if counter == counter_threshold
-                buffs .= buff
-            end
-            counter += 1
-        end
-    end)
-    return buffs
 end
