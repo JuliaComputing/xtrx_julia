@@ -7,7 +7,7 @@ export generate_stream, stream_data, membuffer, tee, flowgate, tripwire, rechunk
        collect_psd, consume_channel, spawn_channel_thread, streaming_filter,
        write_to_file, stream_channel, calc_periodograms, self_downconvert,
        append_vectors, complex2float, MatrixSizedChannel, VectorSizedChannel,
-       AbstractSizedChannel, transform
+       AbstractSizedChannel, transform, collect_single_chunk_at
 
 include("sized_channel.jl")
 
@@ -737,6 +737,20 @@ function calc_periodograms(in::MatrixSizedChannel{Complex{T}}; sampling_freq) wh
             put!(out, out_buff)
         end
     end
+end
+
+function collect_single_chunk_at(in::MatrixSizedChannel{T}; counter_threshold::Int = 1000) where {T <: Number}
+    buffs = Matrix{T}(undef, in.num_samples, in.num_antenna_channels)
+    counter = 0
+    Base.errormonitor(Threads.@spawn begin 
+        consume_channel(in) do buff
+            if counter == counter_threshold
+                buffs .= buff
+            end
+            counter += 1
+        end
+    end)
+    return buffs
 end
 
 end # module LibSigflow
