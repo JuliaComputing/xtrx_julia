@@ -122,6 +122,8 @@ class BaseSoC(SoCCore):
         # JTAGBone ---------------------------------------------------------------------------------
         if with_jtagbone:
             self.add_jtagbone()
+            platform.add_period_constraint(self.jtagbone_phy.cd_jtag.clk, 1e9/20e6)
+            platform.add_false_path_constraints(self.jtagbone_phy.cd_jtag.clk, self.crg.cd_sys.clk)
 
         # Leds -------------------------------------------------------------------------------------
         self.submodules.leds = LedChaser(
@@ -255,7 +257,7 @@ def main():
     parser.add_argument("--build",  action="store_true", help="Build bitstream")
     parser.add_argument("--load",   action="store_true", help="Load bitstream")
     parser.add_argument("--flash",  action="store_true", help="Flash bitstream")
-    parser.add_argument("--address_width",  action="store", default=64, help="PCIe Address Width 64/32")
+    parser.add_argument("--address_width",  action="store", default=64, help="PCIe Address Width (e.g. 64 or 32)")
     parser.add_argument("--nonpro",  action="store_true", help="Generate a bitstream for the non-pro XTRX using the 35T FPGA")
     parser.add_argument("--driver", action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
     args = parser.parse_args()

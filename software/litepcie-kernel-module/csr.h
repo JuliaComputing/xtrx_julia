@@ -7,6 +7,9 @@
 #define CSR_BASE 0xf0000000L
 #endif
 
+#define CSR_WORD_EXTRACT(word, size, offset) (((word) >> (offset)) & ((uint64_t)((1 << (size)) - 1)))
+
+
 /* uart */
 #define CSR_UART_BASE (CSR_BASE + 0x0L)
 #define CSR_UART_RXTX_ADDR (CSR_BASE + 0x0L)
@@ -504,4 +507,1445 @@
 #define CSR_SYNCHRO_STATUS_ADDR (CSR_BASE + 0xe004L)
 #define CSR_SYNCHRO_STATUS_SIZE 1
 
+// Structures to hold CSR metadata for introspection
+struct CSRRegionMetadata {
+	const char *name;
+	// base is in bytes
+	uint32_t base;
+	// word_width is in bits
+	uint16_t word_width;
+};
+
+struct CSRMetadata {
+	const char *name;
+	// addr is in bytes
+	uint32_t addr;
+	// size is in bits
+	uint32_t size;
+	// region is an index into CSR_REGIONS
+	uint32_t region_index;
+};
+
+struct CSRFieldMetadata {
+	const char *name;
+	// offset is in bits
+	uint32_t offset;
+	// size is in bits
+	uint32_t size;
+	// csr_index is an index into CSR_
+	uint32_t csr_index;
+};
+
+// For CSR introspection (such as dumping all CSRs) these lists contain useful metadata
+#define CSR_REGIONS_LEN 23
+#define CSR_METADATA_LEN 117
+#define CSR_FIELDS_LEN 97
+static const struct CSRRegionMetadata CSR_REGION_METADATA[CSR_REGIONS_LEN] = {
+	(struct CSRRegionMetadata){
+		.name       = "uart",
+		.base       = CSR_UART_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "icap",
+		.base       = CSR_ICAP_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "flash",
+		.base       = CSR_FLASH_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "xadc",
+		.base       = CSR_XADC_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "dna",
+		.base       = CSR_DNA_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "aux",
+		.base       = CSR_AUX_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "ctrl",
+		.base       = CSR_CTRL_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "flash_cs_n",
+		.base       = CSR_FLASH_CS_N_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "identifier_mem",
+		.base       = CSR_IDENTIFIER_MEM_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "leds",
+		.base       = CSR_LEDS_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "pcie_phy",
+		.base       = CSR_PCIE_PHY_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "pcie_msi",
+		.base       = CSR_PCIE_MSI_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "pcie_dma0",
+		.base       = CSR_PCIE_DMA0_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "leds2",
+		.base       = CSR_LEDS2_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "timer0",
+		.base       = CSR_TIMER0_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "i2c0",
+		.base       = CSR_I2C0_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "i2c1",
+		.base       = CSR_I2C1_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "gps",
+		.base       = CSR_GPS_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "vctcxo",
+		.base       = CSR_VCTCXO_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "rf_switches",
+		.base       = CSR_RF_SWITCHES_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "lms7002m",
+		.base       = CSR_LMS7002M_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "xsync_spi",
+		.base       = CSR_XSYNC_SPI_BASE,
+		.word_width = 32,
+	},
+	(struct CSRRegionMetadata){
+		.name       = "synchro",
+		.base       = CSR_SYNCHRO_BASE,
+		.word_width = 32,
+	},
+};
+
+static const struct CSRMetadata CSR_METADATA[CSR_METADATA_LEN] = {
+	(struct CSRMetadata){
+		.name         = "rxtx",
+		.addr         = CSR_UART_RXTX_ADDR,
+		.size         = CSR_UART_RXTX_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "txfull",
+		.addr         = CSR_UART_TXFULL_ADDR,
+		.size         = CSR_UART_TXFULL_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "rxempty",
+		.addr         = CSR_UART_RXEMPTY_ADDR,
+		.size         = CSR_UART_RXEMPTY_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "ev_status",
+		.addr         = CSR_UART_EV_STATUS_ADDR,
+		.size         = CSR_UART_EV_STATUS_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "ev_pending",
+		.addr         = CSR_UART_EV_PENDING_ADDR,
+		.size         = CSR_UART_EV_PENDING_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "ev_enable",
+		.addr         = CSR_UART_EV_ENABLE_ADDR,
+		.size         = CSR_UART_EV_ENABLE_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "txempty",
+		.addr         = CSR_UART_TXEMPTY_ADDR,
+		.size         = CSR_UART_TXEMPTY_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "rxfull",
+		.addr         = CSR_UART_RXFULL_ADDR,
+		.size         = CSR_UART_RXFULL_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "xover_rxtx",
+		.addr         = CSR_UART_XOVER_RXTX_ADDR,
+		.size         = CSR_UART_XOVER_RXTX_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "xover_txfull",
+		.addr         = CSR_UART_XOVER_TXFULL_ADDR,
+		.size         = CSR_UART_XOVER_TXFULL_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "xover_rxempty",
+		.addr         = CSR_UART_XOVER_RXEMPTY_ADDR,
+		.size         = CSR_UART_XOVER_RXEMPTY_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "xover_ev_status",
+		.addr         = CSR_UART_XOVER_EV_STATUS_ADDR,
+		.size         = CSR_UART_XOVER_EV_STATUS_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "xover_ev_pending",
+		.addr         = CSR_UART_XOVER_EV_PENDING_ADDR,
+		.size         = CSR_UART_XOVER_EV_PENDING_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "xover_ev_enable",
+		.addr         = CSR_UART_XOVER_EV_ENABLE_ADDR,
+		.size         = CSR_UART_XOVER_EV_ENABLE_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "xover_txempty",
+		.addr         = CSR_UART_XOVER_TXEMPTY_ADDR,
+		.size         = CSR_UART_XOVER_TXEMPTY_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "xover_rxfull",
+		.addr         = CSR_UART_XOVER_RXFULL_ADDR,
+		.size         = CSR_UART_XOVER_RXFULL_SIZE * 32,
+		.region_index = 0,
+	},
+	(struct CSRMetadata){
+		.name         = "addr",
+		.addr         = CSR_ICAP_ADDR_ADDR,
+		.size         = CSR_ICAP_ADDR_SIZE * 32,
+		.region_index = 1,
+	},
+	(struct CSRMetadata){
+		.name         = "data",
+		.addr         = CSR_ICAP_DATA_ADDR,
+		.size         = CSR_ICAP_DATA_SIZE * 32,
+		.region_index = 1,
+	},
+	(struct CSRMetadata){
+		.name         = "write",
+		.addr         = CSR_ICAP_WRITE_ADDR,
+		.size         = CSR_ICAP_WRITE_SIZE * 32,
+		.region_index = 1,
+	},
+	(struct CSRMetadata){
+		.name         = "done",
+		.addr         = CSR_ICAP_DONE_ADDR,
+		.size         = CSR_ICAP_DONE_SIZE * 32,
+		.region_index = 1,
+	},
+	(struct CSRMetadata){
+		.name         = "read",
+		.addr         = CSR_ICAP_READ_ADDR,
+		.size         = CSR_ICAP_READ_SIZE * 32,
+		.region_index = 1,
+	},
+	(struct CSRMetadata){
+		.name         = "spi_control",
+		.addr         = CSR_FLASH_SPI_CONTROL_ADDR,
+		.size         = CSR_FLASH_SPI_CONTROL_SIZE * 32,
+		.region_index = 2,
+	},
+	(struct CSRMetadata){
+		.name         = "spi_status",
+		.addr         = CSR_FLASH_SPI_STATUS_ADDR,
+		.size         = CSR_FLASH_SPI_STATUS_SIZE * 32,
+		.region_index = 2,
+	},
+	(struct CSRMetadata){
+		.name         = "spi_mosi",
+		.addr         = CSR_FLASH_SPI_MOSI_ADDR,
+		.size         = CSR_FLASH_SPI_MOSI_SIZE * 32,
+		.region_index = 2,
+	},
+	(struct CSRMetadata){
+		.name         = "spi_miso",
+		.addr         = CSR_FLASH_SPI_MISO_ADDR,
+		.size         = CSR_FLASH_SPI_MISO_SIZE * 32,
+		.region_index = 2,
+	},
+	(struct CSRMetadata){
+		.name         = "spi_cs",
+		.addr         = CSR_FLASH_SPI_CS_ADDR,
+		.size         = CSR_FLASH_SPI_CS_SIZE * 32,
+		.region_index = 2,
+	},
+	(struct CSRMetadata){
+		.name         = "spi_loopback",
+		.addr         = CSR_FLASH_SPI_LOOPBACK_ADDR,
+		.size         = CSR_FLASH_SPI_LOOPBACK_SIZE * 32,
+		.region_index = 2,
+	},
+	(struct CSRMetadata){
+		.name         = "temperature",
+		.addr         = CSR_XADC_TEMPERATURE_ADDR,
+		.size         = CSR_XADC_TEMPERATURE_SIZE * 32,
+		.region_index = 3,
+	},
+	(struct CSRMetadata){
+		.name         = "vccint",
+		.addr         = CSR_XADC_VCCINT_ADDR,
+		.size         = CSR_XADC_VCCINT_SIZE * 32,
+		.region_index = 3,
+	},
+	(struct CSRMetadata){
+		.name         = "vccaux",
+		.addr         = CSR_XADC_VCCAUX_ADDR,
+		.size         = CSR_XADC_VCCAUX_SIZE * 32,
+		.region_index = 3,
+	},
+	(struct CSRMetadata){
+		.name         = "vccbram",
+		.addr         = CSR_XADC_VCCBRAM_ADDR,
+		.size         = CSR_XADC_VCCBRAM_SIZE * 32,
+		.region_index = 3,
+	},
+	(struct CSRMetadata){
+		.name         = "eoc",
+		.addr         = CSR_XADC_EOC_ADDR,
+		.size         = CSR_XADC_EOC_SIZE * 32,
+		.region_index = 3,
+	},
+	(struct CSRMetadata){
+		.name         = "eos",
+		.addr         = CSR_XADC_EOS_ADDR,
+		.size         = CSR_XADC_EOS_SIZE * 32,
+		.region_index = 3,
+	},
+	(struct CSRMetadata){
+		.name         = "id",
+		.addr         = CSR_DNA_ID_ADDR,
+		.size         = CSR_DNA_ID_SIZE * 32,
+		.region_index = 4,
+	},
+	(struct CSRMetadata){
+		.name         = "control",
+		.addr         = CSR_AUX_CONTROL_ADDR,
+		.size         = CSR_AUX_CONTROL_SIZE * 32,
+		.region_index = 5,
+	},
+	(struct CSRMetadata){
+		.name         = "reset",
+		.addr         = CSR_CTRL_RESET_ADDR,
+		.size         = CSR_CTRL_RESET_SIZE * 32,
+		.region_index = 6,
+	},
+	(struct CSRMetadata){
+		.name         = "scratch",
+		.addr         = CSR_CTRL_SCRATCH_ADDR,
+		.size         = CSR_CTRL_SCRATCH_SIZE * 32,
+		.region_index = 6,
+	},
+	(struct CSRMetadata){
+		.name         = "bus_errors",
+		.addr         = CSR_CTRL_BUS_ERRORS_ADDR,
+		.size         = CSR_CTRL_BUS_ERRORS_SIZE * 32,
+		.region_index = 6,
+	},
+	(struct CSRMetadata){
+		.name         = "out",
+		.addr         = CSR_FLASH_CS_N_OUT_ADDR,
+		.size         = CSR_FLASH_CS_N_OUT_SIZE * 32,
+		.region_index = 7,
+	},
+	(struct CSRMetadata){
+		.name         = "out",
+		.addr         = CSR_LEDS_OUT_ADDR,
+		.size         = CSR_LEDS_OUT_SIZE * 32,
+		.region_index = 9,
+	},
+	(struct CSRMetadata){
+		.name         = "link_status",
+		.addr         = CSR_PCIE_PHY_LINK_STATUS_ADDR,
+		.size         = CSR_PCIE_PHY_LINK_STATUS_SIZE * 32,
+		.region_index = 10,
+	},
+	(struct CSRMetadata){
+		.name         = "msi_enable",
+		.addr         = CSR_PCIE_PHY_MSI_ENABLE_ADDR,
+		.size         = CSR_PCIE_PHY_MSI_ENABLE_SIZE * 32,
+		.region_index = 10,
+	},
+	(struct CSRMetadata){
+		.name         = "msix_enable",
+		.addr         = CSR_PCIE_PHY_MSIX_ENABLE_ADDR,
+		.size         = CSR_PCIE_PHY_MSIX_ENABLE_SIZE * 32,
+		.region_index = 10,
+	},
+	(struct CSRMetadata){
+		.name         = "bus_master_enable",
+		.addr         = CSR_PCIE_PHY_BUS_MASTER_ENABLE_ADDR,
+		.size         = CSR_PCIE_PHY_BUS_MASTER_ENABLE_SIZE * 32,
+		.region_index = 10,
+	},
+	(struct CSRMetadata){
+		.name         = "max_request_size",
+		.addr         = CSR_PCIE_PHY_MAX_REQUEST_SIZE_ADDR,
+		.size         = CSR_PCIE_PHY_MAX_REQUEST_SIZE_SIZE * 32,
+		.region_index = 10,
+	},
+	(struct CSRMetadata){
+		.name         = "max_payload_size",
+		.addr         = CSR_PCIE_PHY_MAX_PAYLOAD_SIZE_ADDR,
+		.size         = CSR_PCIE_PHY_MAX_PAYLOAD_SIZE_SIZE * 32,
+		.region_index = 10,
+	},
+	(struct CSRMetadata){
+		.name         = "enable",
+		.addr         = CSR_PCIE_MSI_ENABLE_ADDR,
+		.size         = CSR_PCIE_MSI_ENABLE_SIZE * 32,
+		.region_index = 11,
+	},
+	(struct CSRMetadata){
+		.name         = "clear",
+		.addr         = CSR_PCIE_MSI_CLEAR_ADDR,
+		.size         = CSR_PCIE_MSI_CLEAR_SIZE * 32,
+		.region_index = 11,
+	},
+	(struct CSRMetadata){
+		.name         = "vector",
+		.addr         = CSR_PCIE_MSI_VECTOR_ADDR,
+		.size         = CSR_PCIE_MSI_VECTOR_SIZE * 32,
+		.region_index = 11,
+	},
+	(struct CSRMetadata){
+		.name         = "writer_enable",
+		.addr         = CSR_PCIE_DMA0_WRITER_ENABLE_ADDR,
+		.size         = CSR_PCIE_DMA0_WRITER_ENABLE_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "writer_table_value",
+		.addr         = CSR_PCIE_DMA0_WRITER_TABLE_VALUE_ADDR,
+		.size         = CSR_PCIE_DMA0_WRITER_TABLE_VALUE_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "writer_table_we",
+		.addr         = CSR_PCIE_DMA0_WRITER_TABLE_WE_ADDR,
+		.size         = CSR_PCIE_DMA0_WRITER_TABLE_WE_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "writer_table_loop_prog_n",
+		.addr         = CSR_PCIE_DMA0_WRITER_TABLE_LOOP_PROG_N_ADDR,
+		.size         = CSR_PCIE_DMA0_WRITER_TABLE_LOOP_PROG_N_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "writer_table_loop_status",
+		.addr         = CSR_PCIE_DMA0_WRITER_TABLE_LOOP_STATUS_ADDR,
+		.size         = CSR_PCIE_DMA0_WRITER_TABLE_LOOP_STATUS_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "writer_table_level",
+		.addr         = CSR_PCIE_DMA0_WRITER_TABLE_LEVEL_ADDR,
+		.size         = CSR_PCIE_DMA0_WRITER_TABLE_LEVEL_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "writer_table_reset",
+		.addr         = CSR_PCIE_DMA0_WRITER_TABLE_RESET_ADDR,
+		.size         = CSR_PCIE_DMA0_WRITER_TABLE_RESET_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "reader_enable",
+		.addr         = CSR_PCIE_DMA0_READER_ENABLE_ADDR,
+		.size         = CSR_PCIE_DMA0_READER_ENABLE_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "reader_table_value",
+		.addr         = CSR_PCIE_DMA0_READER_TABLE_VALUE_ADDR,
+		.size         = CSR_PCIE_DMA0_READER_TABLE_VALUE_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "reader_table_we",
+		.addr         = CSR_PCIE_DMA0_READER_TABLE_WE_ADDR,
+		.size         = CSR_PCIE_DMA0_READER_TABLE_WE_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "reader_table_loop_prog_n",
+		.addr         = CSR_PCIE_DMA0_READER_TABLE_LOOP_PROG_N_ADDR,
+		.size         = CSR_PCIE_DMA0_READER_TABLE_LOOP_PROG_N_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "reader_table_loop_status",
+		.addr         = CSR_PCIE_DMA0_READER_TABLE_LOOP_STATUS_ADDR,
+		.size         = CSR_PCIE_DMA0_READER_TABLE_LOOP_STATUS_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "reader_table_level",
+		.addr         = CSR_PCIE_DMA0_READER_TABLE_LEVEL_ADDR,
+		.size         = CSR_PCIE_DMA0_READER_TABLE_LEVEL_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "reader_table_reset",
+		.addr         = CSR_PCIE_DMA0_READER_TABLE_RESET_ADDR,
+		.size         = CSR_PCIE_DMA0_READER_TABLE_RESET_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "loopback_enable",
+		.addr         = CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR,
+		.size         = CSR_PCIE_DMA0_LOOPBACK_ENABLE_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "synchronizer_bypass",
+		.addr         = CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR,
+		.size         = CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "synchronizer_enable",
+		.addr         = CSR_PCIE_DMA0_SYNCHRONIZER_ENABLE_ADDR,
+		.size         = CSR_PCIE_DMA0_SYNCHRONIZER_ENABLE_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "buffering_reader_fifo_control",
+		.addr         = CSR_PCIE_DMA0_BUFFERING_READER_FIFO_CONTROL_ADDR,
+		.size         = CSR_PCIE_DMA0_BUFFERING_READER_FIFO_CONTROL_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "buffering_reader_fifo_status",
+		.addr         = CSR_PCIE_DMA0_BUFFERING_READER_FIFO_STATUS_ADDR,
+		.size         = CSR_PCIE_DMA0_BUFFERING_READER_FIFO_STATUS_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "buffering_writer_fifo_control",
+		.addr         = CSR_PCIE_DMA0_BUFFERING_WRITER_FIFO_CONTROL_ADDR,
+		.size         = CSR_PCIE_DMA0_BUFFERING_WRITER_FIFO_CONTROL_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "buffering_writer_fifo_status",
+		.addr         = CSR_PCIE_DMA0_BUFFERING_WRITER_FIFO_STATUS_ADDR,
+		.size         = CSR_PCIE_DMA0_BUFFERING_WRITER_FIFO_STATUS_SIZE * 32,
+		.region_index = 12,
+	},
+	(struct CSRMetadata){
+		.name         = "out",
+		.addr         = CSR_LEDS2_OUT_ADDR,
+		.size         = CSR_LEDS2_OUT_SIZE * 32,
+		.region_index = 13,
+	},
+	(struct CSRMetadata){
+		.name         = "load",
+		.addr         = CSR_TIMER0_LOAD_ADDR,
+		.size         = CSR_TIMER0_LOAD_SIZE * 32,
+		.region_index = 14,
+	},
+	(struct CSRMetadata){
+		.name         = "reload",
+		.addr         = CSR_TIMER0_RELOAD_ADDR,
+		.size         = CSR_TIMER0_RELOAD_SIZE * 32,
+		.region_index = 14,
+	},
+	(struct CSRMetadata){
+		.name         = "en",
+		.addr         = CSR_TIMER0_EN_ADDR,
+		.size         = CSR_TIMER0_EN_SIZE * 32,
+		.region_index = 14,
+	},
+	(struct CSRMetadata){
+		.name         = "update_value",
+		.addr         = CSR_TIMER0_UPDATE_VALUE_ADDR,
+		.size         = CSR_TIMER0_UPDATE_VALUE_SIZE * 32,
+		.region_index = 14,
+	},
+	(struct CSRMetadata){
+		.name         = "value",
+		.addr         = CSR_TIMER0_VALUE_ADDR,
+		.size         = CSR_TIMER0_VALUE_SIZE * 32,
+		.region_index = 14,
+	},
+	(struct CSRMetadata){
+		.name         = "ev_status",
+		.addr         = CSR_TIMER0_EV_STATUS_ADDR,
+		.size         = CSR_TIMER0_EV_STATUS_SIZE * 32,
+		.region_index = 14,
+	},
+	(struct CSRMetadata){
+		.name         = "ev_pending",
+		.addr         = CSR_TIMER0_EV_PENDING_ADDR,
+		.size         = CSR_TIMER0_EV_PENDING_SIZE * 32,
+		.region_index = 14,
+	},
+	(struct CSRMetadata){
+		.name         = "ev_enable",
+		.addr         = CSR_TIMER0_EV_ENABLE_ADDR,
+		.size         = CSR_TIMER0_EV_ENABLE_SIZE * 32,
+		.region_index = 14,
+	},
+	(struct CSRMetadata){
+		.name         = "w",
+		.addr         = CSR_I2C0_W_ADDR,
+		.size         = CSR_I2C0_W_SIZE * 32,
+		.region_index = 15,
+	},
+	(struct CSRMetadata){
+		.name         = "r",
+		.addr         = CSR_I2C0_R_ADDR,
+		.size         = CSR_I2C0_R_SIZE * 32,
+		.region_index = 15,
+	},
+	(struct CSRMetadata){
+		.name         = "w",
+		.addr         = CSR_I2C1_W_ADDR,
+		.size         = CSR_I2C1_W_SIZE * 32,
+		.region_index = 16,
+	},
+	(struct CSRMetadata){
+		.name         = "r",
+		.addr         = CSR_I2C1_R_ADDR,
+		.size         = CSR_I2C1_R_SIZE * 32,
+		.region_index = 16,
+	},
+	(struct CSRMetadata){
+		.name         = "control",
+		.addr         = CSR_GPS_CONTROL_ADDR,
+		.size         = CSR_GPS_CONTROL_SIZE * 32,
+		.region_index = 17,
+	},
+	(struct CSRMetadata){
+		.name         = "uart_rxtx",
+		.addr         = CSR_GPS_UART_RXTX_ADDR,
+		.size         = CSR_GPS_UART_RXTX_SIZE * 32,
+		.region_index = 17,
+	},
+	(struct CSRMetadata){
+		.name         = "uart_txfull",
+		.addr         = CSR_GPS_UART_TXFULL_ADDR,
+		.size         = CSR_GPS_UART_TXFULL_SIZE * 32,
+		.region_index = 17,
+	},
+	(struct CSRMetadata){
+		.name         = "uart_rxempty",
+		.addr         = CSR_GPS_UART_RXEMPTY_ADDR,
+		.size         = CSR_GPS_UART_RXEMPTY_SIZE * 32,
+		.region_index = 17,
+	},
+	(struct CSRMetadata){
+		.name         = "uart_ev_status",
+		.addr         = CSR_GPS_UART_EV_STATUS_ADDR,
+		.size         = CSR_GPS_UART_EV_STATUS_SIZE * 32,
+		.region_index = 17,
+	},
+	(struct CSRMetadata){
+		.name         = "uart_ev_pending",
+		.addr         = CSR_GPS_UART_EV_PENDING_ADDR,
+		.size         = CSR_GPS_UART_EV_PENDING_SIZE * 32,
+		.region_index = 17,
+	},
+	(struct CSRMetadata){
+		.name         = "uart_ev_enable",
+		.addr         = CSR_GPS_UART_EV_ENABLE_ADDR,
+		.size         = CSR_GPS_UART_EV_ENABLE_SIZE * 32,
+		.region_index = 17,
+	},
+	(struct CSRMetadata){
+		.name         = "uart_txempty",
+		.addr         = CSR_GPS_UART_TXEMPTY_ADDR,
+		.size         = CSR_GPS_UART_TXEMPTY_SIZE * 32,
+		.region_index = 17,
+	},
+	(struct CSRMetadata){
+		.name         = "uart_rxfull",
+		.addr         = CSR_GPS_UART_RXFULL_ADDR,
+		.size         = CSR_GPS_UART_RXFULL_SIZE * 32,
+		.region_index = 17,
+	},
+	(struct CSRMetadata){
+		.name         = "control",
+		.addr         = CSR_VCTCXO_CONTROL_ADDR,
+		.size         = CSR_VCTCXO_CONTROL_SIZE * 32,
+		.region_index = 18,
+	},
+	(struct CSRMetadata){
+		.name         = "cycles_latch",
+		.addr         = CSR_VCTCXO_CYCLES_LATCH_ADDR,
+		.size         = CSR_VCTCXO_CYCLES_LATCH_SIZE * 32,
+		.region_index = 18,
+	},
+	(struct CSRMetadata){
+		.name         = "cycles",
+		.addr         = CSR_VCTCXO_CYCLES_ADDR,
+		.size         = CSR_VCTCXO_CYCLES_SIZE * 32,
+		.region_index = 18,
+	},
+	(struct CSRMetadata){
+		.name         = "tx",
+		.addr         = CSR_RF_SWITCHES_TX_ADDR,
+		.size         = CSR_RF_SWITCHES_TX_SIZE * 32,
+		.region_index = 19,
+	},
+	(struct CSRMetadata){
+		.name         = "rx",
+		.addr         = CSR_RF_SWITCHES_RX_ADDR,
+		.size         = CSR_RF_SWITCHES_RX_SIZE * 32,
+		.region_index = 19,
+	},
+	(struct CSRMetadata){
+		.name         = "control",
+		.addr         = CSR_LMS7002M_CONTROL_ADDR,
+		.size         = CSR_LMS7002M_CONTROL_SIZE * 32,
+		.region_index = 20,
+	},
+	(struct CSRMetadata){
+		.name         = "status",
+		.addr         = CSR_LMS7002M_STATUS_ADDR,
+		.size         = CSR_LMS7002M_STATUS_SIZE * 32,
+		.region_index = 20,
+	},
+	(struct CSRMetadata){
+		.name         = "delay",
+		.addr         = CSR_LMS7002M_DELAY_ADDR,
+		.size         = CSR_LMS7002M_DELAY_SIZE * 32,
+		.region_index = 20,
+	},
+	(struct CSRMetadata){
+		.name         = "spi_control",
+		.addr         = CSR_LMS7002M_SPI_CONTROL_ADDR,
+		.size         = CSR_LMS7002M_SPI_CONTROL_SIZE * 32,
+		.region_index = 20,
+	},
+	(struct CSRMetadata){
+		.name         = "spi_status",
+		.addr         = CSR_LMS7002M_SPI_STATUS_ADDR,
+		.size         = CSR_LMS7002M_SPI_STATUS_SIZE * 32,
+		.region_index = 20,
+	},
+	(struct CSRMetadata){
+		.name         = "spi_mosi",
+		.addr         = CSR_LMS7002M_SPI_MOSI_ADDR,
+		.size         = CSR_LMS7002M_SPI_MOSI_SIZE * 32,
+		.region_index = 20,
+	},
+	(struct CSRMetadata){
+		.name         = "spi_miso",
+		.addr         = CSR_LMS7002M_SPI_MISO_ADDR,
+		.size         = CSR_LMS7002M_SPI_MISO_SIZE * 32,
+		.region_index = 20,
+	},
+	(struct CSRMetadata){
+		.name         = "spi_cs",
+		.addr         = CSR_LMS7002M_SPI_CS_ADDR,
+		.size         = CSR_LMS7002M_SPI_CS_SIZE * 32,
+		.region_index = 20,
+	},
+	(struct CSRMetadata){
+		.name         = "spi_loopback",
+		.addr         = CSR_LMS7002M_SPI_LOOPBACK_ADDR,
+		.size         = CSR_LMS7002M_SPI_LOOPBACK_SIZE * 32,
+		.region_index = 20,
+	},
+	(struct CSRMetadata){
+		.name         = "tx_pattern_control",
+		.addr         = CSR_LMS7002M_TX_PATTERN_CONTROL_ADDR,
+		.size         = CSR_LMS7002M_TX_PATTERN_CONTROL_SIZE * 32,
+		.region_index = 20,
+	},
+	(struct CSRMetadata){
+		.name         = "rx_pattern_control",
+		.addr         = CSR_LMS7002M_RX_PATTERN_CONTROL_ADDR,
+		.size         = CSR_LMS7002M_RX_PATTERN_CONTROL_SIZE * 32,
+		.region_index = 20,
+	},
+	(struct CSRMetadata){
+		.name         = "rx_pattern_errors",
+		.addr         = CSR_LMS7002M_RX_PATTERN_ERRORS_ADDR,
+		.size         = CSR_LMS7002M_RX_PATTERN_ERRORS_SIZE * 32,
+		.region_index = 20,
+	},
+	(struct CSRMetadata){
+		.name         = "control",
+		.addr         = CSR_XSYNC_SPI_CONTROL_ADDR,
+		.size         = CSR_XSYNC_SPI_CONTROL_SIZE * 32,
+		.region_index = 21,
+	},
+	(struct CSRMetadata){
+		.name         = "status",
+		.addr         = CSR_XSYNC_SPI_STATUS_ADDR,
+		.size         = CSR_XSYNC_SPI_STATUS_SIZE * 32,
+		.region_index = 21,
+	},
+	(struct CSRMetadata){
+		.name         = "mosi",
+		.addr         = CSR_XSYNC_SPI_MOSI_ADDR,
+		.size         = CSR_XSYNC_SPI_MOSI_SIZE * 32,
+		.region_index = 21,
+	},
+	(struct CSRMetadata){
+		.name         = "miso",
+		.addr         = CSR_XSYNC_SPI_MISO_ADDR,
+		.size         = CSR_XSYNC_SPI_MISO_SIZE * 32,
+		.region_index = 21,
+	},
+	(struct CSRMetadata){
+		.name         = "cs",
+		.addr         = CSR_XSYNC_SPI_CS_ADDR,
+		.size         = CSR_XSYNC_SPI_CS_SIZE * 32,
+		.region_index = 21,
+	},
+	(struct CSRMetadata){
+		.name         = "loopback",
+		.addr         = CSR_XSYNC_SPI_LOOPBACK_ADDR,
+		.size         = CSR_XSYNC_SPI_LOOPBACK_SIZE * 32,
+		.region_index = 21,
+	},
+	(struct CSRMetadata){
+		.name         = "control",
+		.addr         = CSR_SYNCHRO_CONTROL_ADDR,
+		.size         = CSR_SYNCHRO_CONTROL_SIZE * 32,
+		.region_index = 22,
+	},
+	(struct CSRMetadata){
+		.name         = "status",
+		.addr         = CSR_SYNCHRO_STATUS_ADDR,
+		.size         = CSR_SYNCHRO_STATUS_SIZE * 32,
+		.region_index = 22,
+	},
+};
+static const struct CSRFieldMetadata CSR_FIELD_METADATA[CSR_FIELDS_LEN] = {
+	(struct CSRFieldMetadata){
+		.name         = "tx",
+		.offset       = CSR_UART_EV_STATUS_TX_OFFSET,
+		.size         = CSR_UART_EV_STATUS_TX_SIZE,
+		.csr_index    = 4,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rx",
+		.offset       = CSR_UART_EV_STATUS_RX_OFFSET,
+		.size         = CSR_UART_EV_STATUS_RX_SIZE,
+		.csr_index    = 4,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "tx",
+		.offset       = CSR_UART_EV_PENDING_TX_OFFSET,
+		.size         = CSR_UART_EV_PENDING_TX_SIZE,
+		.csr_index    = 5,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rx",
+		.offset       = CSR_UART_EV_PENDING_RX_OFFSET,
+		.size         = CSR_UART_EV_PENDING_RX_SIZE,
+		.csr_index    = 5,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "tx",
+		.offset       = CSR_UART_EV_ENABLE_TX_OFFSET,
+		.size         = CSR_UART_EV_ENABLE_TX_SIZE,
+		.csr_index    = 6,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rx",
+		.offset       = CSR_UART_EV_ENABLE_RX_OFFSET,
+		.size         = CSR_UART_EV_ENABLE_RX_SIZE,
+		.csr_index    = 6,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "tx",
+		.offset       = CSR_UART_XOVER_EV_STATUS_TX_OFFSET,
+		.size         = CSR_UART_XOVER_EV_STATUS_TX_SIZE,
+		.csr_index    = 12,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rx",
+		.offset       = CSR_UART_XOVER_EV_STATUS_RX_OFFSET,
+		.size         = CSR_UART_XOVER_EV_STATUS_RX_SIZE,
+		.csr_index    = 12,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "tx",
+		.offset       = CSR_UART_XOVER_EV_PENDING_TX_OFFSET,
+		.size         = CSR_UART_XOVER_EV_PENDING_TX_SIZE,
+		.csr_index    = 13,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rx",
+		.offset       = CSR_UART_XOVER_EV_PENDING_RX_OFFSET,
+		.size         = CSR_UART_XOVER_EV_PENDING_RX_SIZE,
+		.csr_index    = 13,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "tx",
+		.offset       = CSR_UART_XOVER_EV_ENABLE_TX_OFFSET,
+		.size         = CSR_UART_XOVER_EV_ENABLE_TX_SIZE,
+		.csr_index    = 14,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rx",
+		.offset       = CSR_UART_XOVER_EV_ENABLE_RX_OFFSET,
+		.size         = CSR_UART_XOVER_EV_ENABLE_RX_SIZE,
+		.csr_index    = 14,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "start",
+		.offset       = CSR_FLASH_SPI_CONTROL_START_OFFSET,
+		.size         = CSR_FLASH_SPI_CONTROL_START_SIZE,
+		.csr_index    = 22,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "length",
+		.offset       = CSR_FLASH_SPI_CONTROL_LENGTH_OFFSET,
+		.size         = CSR_FLASH_SPI_CONTROL_LENGTH_SIZE,
+		.csr_index    = 22,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "done",
+		.offset       = CSR_FLASH_SPI_STATUS_DONE_OFFSET,
+		.size         = CSR_FLASH_SPI_STATUS_DONE_SIZE,
+		.csr_index    = 23,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "sel",
+		.offset       = CSR_FLASH_SPI_CS_SEL_OFFSET,
+		.size         = CSR_FLASH_SPI_CS_SEL_SIZE,
+		.csr_index    = 26,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "mode",
+		.offset       = CSR_FLASH_SPI_CS_MODE_OFFSET,
+		.size         = CSR_FLASH_SPI_CS_MODE_SIZE,
+		.csr_index    = 26,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "mode",
+		.offset       = CSR_FLASH_SPI_LOOPBACK_MODE_OFFSET,
+		.size         = CSR_FLASH_SPI_LOOPBACK_MODE_SIZE,
+		.csr_index    = 27,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "iovcc_sel",
+		.offset       = CSR_AUX_CONTROL_IOVCC_SEL_OFFSET,
+		.size         = CSR_AUX_CONTROL_IOVCC_SEL_SIZE,
+		.csr_index    = 35,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "en_smsigio",
+		.offset       = CSR_AUX_CONTROL_EN_SMSIGIO_OFFSET,
+		.size         = CSR_AUX_CONTROL_EN_SMSIGIO_SIZE,
+		.csr_index    = 35,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "option",
+		.offset       = CSR_AUX_CONTROL_OPTION_OFFSET,
+		.size         = CSR_AUX_CONTROL_OPTION_SIZE,
+		.csr_index    = 35,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "gpio13",
+		.offset       = CSR_AUX_CONTROL_GPIO13_OFFSET,
+		.size         = CSR_AUX_CONTROL_GPIO13_SIZE,
+		.csr_index    = 35,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "soc_rst",
+		.offset       = CSR_CTRL_RESET_SOC_RST_OFFSET,
+		.size         = CSR_CTRL_RESET_SOC_RST_SIZE,
+		.csr_index    = 36,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "cpu_rst",
+		.offset       = CSR_CTRL_RESET_CPU_RST_OFFSET,
+		.size         = CSR_CTRL_RESET_CPU_RST_SIZE,
+		.csr_index    = 36,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "status",
+		.offset       = CSR_PCIE_PHY_LINK_STATUS_STATUS_OFFSET,
+		.size         = CSR_PCIE_PHY_LINK_STATUS_STATUS_SIZE,
+		.csr_index    = 41,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rate",
+		.offset       = CSR_PCIE_PHY_LINK_STATUS_RATE_OFFSET,
+		.size         = CSR_PCIE_PHY_LINK_STATUS_RATE_SIZE,
+		.csr_index    = 41,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "width",
+		.offset       = CSR_PCIE_PHY_LINK_STATUS_WIDTH_OFFSET,
+		.size         = CSR_PCIE_PHY_LINK_STATUS_WIDTH_SIZE,
+		.csr_index    = 41,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "ltssm",
+		.offset       = CSR_PCIE_PHY_LINK_STATUS_LTSSM_OFFSET,
+		.size         = CSR_PCIE_PHY_LINK_STATUS_LTSSM_SIZE,
+		.csr_index    = 41,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "address_lsb",
+		.offset       = CSR_PCIE_DMA0_WRITER_TABLE_VALUE_ADDRESS_LSB_OFFSET,
+		.size         = CSR_PCIE_DMA0_WRITER_TABLE_VALUE_ADDRESS_LSB_SIZE,
+		.csr_index    = 51,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "length",
+		.offset       = CSR_PCIE_DMA0_WRITER_TABLE_VALUE_LENGTH_OFFSET,
+		.size         = CSR_PCIE_DMA0_WRITER_TABLE_VALUE_LENGTH_SIZE,
+		.csr_index    = 51,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "irq_disable",
+		.offset       = CSR_PCIE_DMA0_WRITER_TABLE_VALUE_IRQ_DISABLE_OFFSET,
+		.size         = CSR_PCIE_DMA0_WRITER_TABLE_VALUE_IRQ_DISABLE_SIZE,
+		.csr_index    = 51,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "last_disable",
+		.offset       = CSR_PCIE_DMA0_WRITER_TABLE_VALUE_LAST_DISABLE_OFFSET,
+		.size         = CSR_PCIE_DMA0_WRITER_TABLE_VALUE_LAST_DISABLE_SIZE,
+		.csr_index    = 51,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "address_msb",
+		.offset       = CSR_PCIE_DMA0_WRITER_TABLE_WE_ADDRESS_MSB_OFFSET,
+		.size         = CSR_PCIE_DMA0_WRITER_TABLE_WE_ADDRESS_MSB_SIZE,
+		.csr_index    = 52,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "index",
+		.offset       = CSR_PCIE_DMA0_WRITER_TABLE_LOOP_STATUS_INDEX_OFFSET,
+		.size         = CSR_PCIE_DMA0_WRITER_TABLE_LOOP_STATUS_INDEX_SIZE,
+		.csr_index    = 54,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "count",
+		.offset       = CSR_PCIE_DMA0_WRITER_TABLE_LOOP_STATUS_COUNT_OFFSET,
+		.size         = CSR_PCIE_DMA0_WRITER_TABLE_LOOP_STATUS_COUNT_SIZE,
+		.csr_index    = 54,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "address_lsb",
+		.offset       = CSR_PCIE_DMA0_READER_TABLE_VALUE_ADDRESS_LSB_OFFSET,
+		.size         = CSR_PCIE_DMA0_READER_TABLE_VALUE_ADDRESS_LSB_SIZE,
+		.csr_index    = 58,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "length",
+		.offset       = CSR_PCIE_DMA0_READER_TABLE_VALUE_LENGTH_OFFSET,
+		.size         = CSR_PCIE_DMA0_READER_TABLE_VALUE_LENGTH_SIZE,
+		.csr_index    = 58,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "irq_disable",
+		.offset       = CSR_PCIE_DMA0_READER_TABLE_VALUE_IRQ_DISABLE_OFFSET,
+		.size         = CSR_PCIE_DMA0_READER_TABLE_VALUE_IRQ_DISABLE_SIZE,
+		.csr_index    = 58,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "last_disable",
+		.offset       = CSR_PCIE_DMA0_READER_TABLE_VALUE_LAST_DISABLE_OFFSET,
+		.size         = CSR_PCIE_DMA0_READER_TABLE_VALUE_LAST_DISABLE_SIZE,
+		.csr_index    = 58,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "address_msb",
+		.offset       = CSR_PCIE_DMA0_READER_TABLE_WE_ADDRESS_MSB_OFFSET,
+		.size         = CSR_PCIE_DMA0_READER_TABLE_WE_ADDRESS_MSB_SIZE,
+		.csr_index    = 59,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "index",
+		.offset       = CSR_PCIE_DMA0_READER_TABLE_LOOP_STATUS_INDEX_OFFSET,
+		.size         = CSR_PCIE_DMA0_READER_TABLE_LOOP_STATUS_INDEX_SIZE,
+		.csr_index    = 61,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "count",
+		.offset       = CSR_PCIE_DMA0_READER_TABLE_LOOP_STATUS_COUNT_OFFSET,
+		.size         = CSR_PCIE_DMA0_READER_TABLE_LOOP_STATUS_COUNT_SIZE,
+		.csr_index    = 61,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "mode",
+		.offset       = CSR_PCIE_DMA0_SYNCHRONIZER_ENABLE_MODE_OFFSET,
+		.size         = CSR_PCIE_DMA0_SYNCHRONIZER_ENABLE_MODE_SIZE,
+		.csr_index    = 66,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "depth",
+		.offset       = CSR_PCIE_DMA0_BUFFERING_READER_FIFO_CONTROL_DEPTH_OFFSET,
+		.size         = CSR_PCIE_DMA0_BUFFERING_READER_FIFO_CONTROL_DEPTH_SIZE,
+		.csr_index    = 67,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "scratch",
+		.offset       = CSR_PCIE_DMA0_BUFFERING_READER_FIFO_CONTROL_SCRATCH_OFFSET,
+		.size         = CSR_PCIE_DMA0_BUFFERING_READER_FIFO_CONTROL_SCRATCH_SIZE,
+		.csr_index    = 67,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "level_mode",
+		.offset       = CSR_PCIE_DMA0_BUFFERING_READER_FIFO_CONTROL_LEVEL_MODE_OFFSET,
+		.size         = CSR_PCIE_DMA0_BUFFERING_READER_FIFO_CONTROL_LEVEL_MODE_SIZE,
+		.csr_index    = 67,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "level",
+		.offset       = CSR_PCIE_DMA0_BUFFERING_READER_FIFO_STATUS_LEVEL_OFFSET,
+		.size         = CSR_PCIE_DMA0_BUFFERING_READER_FIFO_STATUS_LEVEL_SIZE,
+		.csr_index    = 68,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "depth",
+		.offset       = CSR_PCIE_DMA0_BUFFERING_WRITER_FIFO_CONTROL_DEPTH_OFFSET,
+		.size         = CSR_PCIE_DMA0_BUFFERING_WRITER_FIFO_CONTROL_DEPTH_SIZE,
+		.csr_index    = 69,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "scratch",
+		.offset       = CSR_PCIE_DMA0_BUFFERING_WRITER_FIFO_CONTROL_SCRATCH_OFFSET,
+		.size         = CSR_PCIE_DMA0_BUFFERING_WRITER_FIFO_CONTROL_SCRATCH_SIZE,
+		.csr_index    = 69,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "level_mode",
+		.offset       = CSR_PCIE_DMA0_BUFFERING_WRITER_FIFO_CONTROL_LEVEL_MODE_OFFSET,
+		.size         = CSR_PCIE_DMA0_BUFFERING_WRITER_FIFO_CONTROL_LEVEL_MODE_SIZE,
+		.csr_index    = 69,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "level",
+		.offset       = CSR_PCIE_DMA0_BUFFERING_WRITER_FIFO_STATUS_LEVEL_OFFSET,
+		.size         = CSR_PCIE_DMA0_BUFFERING_WRITER_FIFO_STATUS_LEVEL_SIZE,
+		.csr_index    = 70,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "zero",
+		.offset       = CSR_TIMER0_EV_STATUS_ZERO_OFFSET,
+		.size         = CSR_TIMER0_EV_STATUS_ZERO_SIZE,
+		.csr_index    = 77,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "zero",
+		.offset       = CSR_TIMER0_EV_PENDING_ZERO_OFFSET,
+		.size         = CSR_TIMER0_EV_PENDING_ZERO_SIZE,
+		.csr_index    = 78,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "zero",
+		.offset       = CSR_TIMER0_EV_ENABLE_ZERO_OFFSET,
+		.size         = CSR_TIMER0_EV_ENABLE_ZERO_SIZE,
+		.csr_index    = 79,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "scl",
+		.offset       = CSR_I2C0_W_SCL_OFFSET,
+		.size         = CSR_I2C0_W_SCL_SIZE,
+		.csr_index    = 80,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "oe",
+		.offset       = CSR_I2C0_W_OE_OFFSET,
+		.size         = CSR_I2C0_W_OE_SIZE,
+		.csr_index    = 80,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "sda",
+		.offset       = CSR_I2C0_W_SDA_OFFSET,
+		.size         = CSR_I2C0_W_SDA_SIZE,
+		.csr_index    = 80,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "sda",
+		.offset       = CSR_I2C0_R_SDA_OFFSET,
+		.size         = CSR_I2C0_R_SDA_SIZE,
+		.csr_index    = 81,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "scl",
+		.offset       = CSR_I2C1_W_SCL_OFFSET,
+		.size         = CSR_I2C1_W_SCL_SIZE,
+		.csr_index    = 82,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "oe",
+		.offset       = CSR_I2C1_W_OE_OFFSET,
+		.size         = CSR_I2C1_W_OE_SIZE,
+		.csr_index    = 82,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "sda",
+		.offset       = CSR_I2C1_W_SDA_OFFSET,
+		.size         = CSR_I2C1_W_SDA_SIZE,
+		.csr_index    = 82,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "sda",
+		.offset       = CSR_I2C1_R_SDA_OFFSET,
+		.size         = CSR_I2C1_R_SDA_SIZE,
+		.csr_index    = 83,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "enable",
+		.offset       = CSR_GPS_CONTROL_ENABLE_OFFSET,
+		.size         = CSR_GPS_CONTROL_ENABLE_SIZE,
+		.csr_index    = 84,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "tx",
+		.offset       = CSR_GPS_UART_EV_STATUS_TX_OFFSET,
+		.size         = CSR_GPS_UART_EV_STATUS_TX_SIZE,
+		.csr_index    = 88,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rx",
+		.offset       = CSR_GPS_UART_EV_STATUS_RX_OFFSET,
+		.size         = CSR_GPS_UART_EV_STATUS_RX_SIZE,
+		.csr_index    = 88,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "tx",
+		.offset       = CSR_GPS_UART_EV_PENDING_TX_OFFSET,
+		.size         = CSR_GPS_UART_EV_PENDING_TX_SIZE,
+		.csr_index    = 89,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rx",
+		.offset       = CSR_GPS_UART_EV_PENDING_RX_OFFSET,
+		.size         = CSR_GPS_UART_EV_PENDING_RX_SIZE,
+		.csr_index    = 89,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "tx",
+		.offset       = CSR_GPS_UART_EV_ENABLE_TX_OFFSET,
+		.size         = CSR_GPS_UART_EV_ENABLE_TX_SIZE,
+		.csr_index    = 90,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rx",
+		.offset       = CSR_GPS_UART_EV_ENABLE_RX_OFFSET,
+		.size         = CSR_GPS_UART_EV_ENABLE_RX_SIZE,
+		.csr_index    = 90,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "sel",
+		.offset       = CSR_VCTCXO_CONTROL_SEL_OFFSET,
+		.size         = CSR_VCTCXO_CONTROL_SEL_SIZE,
+		.csr_index    = 93,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "en",
+		.offset       = CSR_VCTCXO_CONTROL_EN_OFFSET,
+		.size         = CSR_VCTCXO_CONTROL_EN_SIZE,
+		.csr_index    = 93,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "reset",
+		.offset       = CSR_LMS7002M_CONTROL_RESET_OFFSET,
+		.size         = CSR_LMS7002M_CONTROL_RESET_SIZE,
+		.csr_index    = 98,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "power_down",
+		.offset       = CSR_LMS7002M_CONTROL_POWER_DOWN_OFFSET,
+		.size         = CSR_LMS7002M_CONTROL_POWER_DOWN_SIZE,
+		.csr_index    = 98,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "tx_enable",
+		.offset       = CSR_LMS7002M_CONTROL_TX_ENABLE_OFFSET,
+		.size         = CSR_LMS7002M_CONTROL_TX_ENABLE_SIZE,
+		.csr_index    = 98,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rx_enable",
+		.offset       = CSR_LMS7002M_CONTROL_RX_ENABLE_OFFSET,
+		.size         = CSR_LMS7002M_CONTROL_RX_ENABLE_SIZE,
+		.csr_index    = 98,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "tx_rx_loopback_enable",
+		.offset       = CSR_LMS7002M_CONTROL_TX_RX_LOOPBACK_ENABLE_OFFSET,
+		.size         = CSR_LMS7002M_CONTROL_TX_RX_LOOPBACK_ENABLE_SIZE,
+		.csr_index    = 98,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rx_clk_active",
+		.offset       = CSR_LMS7002M_STATUS_RX_CLK_ACTIVE_OFFSET,
+		.size         = CSR_LMS7002M_STATUS_RX_CLK_ACTIVE_SIZE,
+		.csr_index    = 99,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rx_frame_active",
+		.offset       = CSR_LMS7002M_STATUS_RX_FRAME_ACTIVE_OFFSET,
+		.size         = CSR_LMS7002M_STATUS_RX_FRAME_ACTIVE_SIZE,
+		.csr_index    = 99,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rx_frame_aligned",
+		.offset       = CSR_LMS7002M_STATUS_RX_FRAME_ALIGNED_OFFSET,
+		.size         = CSR_LMS7002M_STATUS_RX_FRAME_ALIGNED_SIZE,
+		.csr_index    = 99,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "tx_delay",
+		.offset       = CSR_LMS7002M_DELAY_TX_DELAY_OFFSET,
+		.size         = CSR_LMS7002M_DELAY_TX_DELAY_SIZE,
+		.csr_index    = 100,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "rx_delay",
+		.offset       = CSR_LMS7002M_DELAY_RX_DELAY_OFFSET,
+		.size         = CSR_LMS7002M_DELAY_RX_DELAY_SIZE,
+		.csr_index    = 100,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "start",
+		.offset       = CSR_LMS7002M_SPI_CONTROL_START_OFFSET,
+		.size         = CSR_LMS7002M_SPI_CONTROL_START_SIZE,
+		.csr_index    = 101,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "length",
+		.offset       = CSR_LMS7002M_SPI_CONTROL_LENGTH_OFFSET,
+		.size         = CSR_LMS7002M_SPI_CONTROL_LENGTH_SIZE,
+		.csr_index    = 101,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "done",
+		.offset       = CSR_LMS7002M_SPI_STATUS_DONE_OFFSET,
+		.size         = CSR_LMS7002M_SPI_STATUS_DONE_SIZE,
+		.csr_index    = 102,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "sel",
+		.offset       = CSR_LMS7002M_SPI_CS_SEL_OFFSET,
+		.size         = CSR_LMS7002M_SPI_CS_SEL_SIZE,
+		.csr_index    = 105,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "mode",
+		.offset       = CSR_LMS7002M_SPI_CS_MODE_OFFSET,
+		.size         = CSR_LMS7002M_SPI_CS_MODE_SIZE,
+		.csr_index    = 105,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "mode",
+		.offset       = CSR_LMS7002M_SPI_LOOPBACK_MODE_OFFSET,
+		.size         = CSR_LMS7002M_SPI_LOOPBACK_MODE_SIZE,
+		.csr_index    = 106,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "enable",
+		.offset       = CSR_LMS7002M_TX_PATTERN_CONTROL_ENABLE_OFFSET,
+		.size         = CSR_LMS7002M_TX_PATTERN_CONTROL_ENABLE_SIZE,
+		.csr_index    = 107,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "enable",
+		.offset       = CSR_LMS7002M_RX_PATTERN_CONTROL_ENABLE_OFFSET,
+		.size         = CSR_LMS7002M_RX_PATTERN_CONTROL_ENABLE_SIZE,
+		.csr_index    = 108,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "start",
+		.offset       = CSR_XSYNC_SPI_CONTROL_START_OFFSET,
+		.size         = CSR_XSYNC_SPI_CONTROL_START_SIZE,
+		.csr_index    = 110,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "length",
+		.offset       = CSR_XSYNC_SPI_CONTROL_LENGTH_OFFSET,
+		.size         = CSR_XSYNC_SPI_CONTROL_LENGTH_SIZE,
+		.csr_index    = 110,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "done",
+		.offset       = CSR_XSYNC_SPI_STATUS_DONE_OFFSET,
+		.size         = CSR_XSYNC_SPI_STATUS_DONE_SIZE,
+		.csr_index    = 111,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "sel",
+		.offset       = CSR_XSYNC_SPI_CS_SEL_OFFSET,
+		.size         = CSR_XSYNC_SPI_CS_SEL_SIZE,
+		.csr_index    = 114,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "mode",
+		.offset       = CSR_XSYNC_SPI_CS_MODE_OFFSET,
+		.size         = CSR_XSYNC_SPI_CS_MODE_SIZE,
+		.csr_index    = 114,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "mode",
+		.offset       = CSR_XSYNC_SPI_LOOPBACK_MODE_OFFSET,
+		.size         = CSR_XSYNC_SPI_LOOPBACK_MODE_SIZE,
+		.csr_index    = 115,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "int_source",
+		.offset       = CSR_SYNCHRO_CONTROL_INT_SOURCE_OFFSET,
+		.size         = CSR_SYNCHRO_CONTROL_INT_SOURCE_SIZE,
+		.csr_index    = 116,
+	},
+	(struct CSRFieldMetadata){
+		.name         = "out_source",
+		.offset       = CSR_SYNCHRO_CONTROL_OUT_SOURCE_OFFSET,
+		.size         = CSR_SYNCHRO_CONTROL_OUT_SOURCE_SIZE,
+		.csr_index    = 116,
+	},
+};
+
+#define CSR_EXTRACT_FIELD(word, csr) CSR_WORD_EXTRACT(word, (csr).size, (csr).offset)
 #endif

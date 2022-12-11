@@ -165,6 +165,7 @@ function do_txrx(mode::Symbol;
         # Dump an initial INI, showing how the registers are configured here
         if dump_inis
             SoapySDR.SoapySDRDevice_writeSetting(dev, "DUMP_INI", "$(mode).ini")
+            SoapySDR.SoapySDRDevice_writeSetting(dev, "LITEX_DUMP_INI", "$(mode).csr.ini")
         end
 
         # Construct streams
@@ -220,6 +221,9 @@ function do_txrx(mode::Symbol;
         # Ensure that we're done transmitting as well.
         # This should always be the case, but best to be sure.
         wait(t_tx)
+
+        @info("DMA buffer dump")
+        println(dev[SoapySDR.Setting("DMA_BUFFERS")])
         return iq_data, data_tx
     end
 end
@@ -287,6 +291,9 @@ function main(args::String...)
     ]
 
     if full_suite
+        full_loopback_suite(; dump_inis, register_sets, skip_sanity_check)
+
+        # DEBUGGING: do this twice
         full_loopback_suite(; dump_inis, register_sets, skip_sanity_check)
     else
         iq_data, data_tx = do_txrx(mode; dump_inis, register_sets, skip_sanity_check)

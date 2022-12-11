@@ -1,5 +1,25 @@
 module CSRs
 
+struct CSRRegionMetadata
+    name::Ptr{Cchar}
+    base::Cint
+    word_width::Cint
+end
+
+struct CSRMetadata
+    name::Ptr{Cchar}
+    addr::Cint
+    size::Cint
+    region_index::Cint
+end
+
+struct CSRFieldMetadata
+    name::Ptr{Cchar}
+    offset::Cint
+    size::Cint
+    csr_index::Cint
+end
+
 const CSR_BASE = Clong(0xf0000000)
 
 const CSR_UART_BASE = CSR_BASE + Clong(0x00)
@@ -903,6 +923,12 @@ const CSR_SYNCHRO_CONTROL_OUT_SOURCE_SIZE = 4
 const CSR_SYNCHRO_STATUS_ADDR = CSR_BASE + Clong(0xe004)
 
 const CSR_SYNCHRO_STATUS_SIZE = 1
+
+const CSR_REGIONS_LEN = 23
+
+const CSR_METADATA_LEN = 117
+
+const CSR_FIELDS_LEN = 97
 
 const CONFIG_CLOCK_FREQUENCY = 125000000
 

@@ -377,7 +377,7 @@ static int check_pn_data(const uint32_t *buf, int count, uint32_t *pseed, int da
 }
 #endif
 
-static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width, int auto_rx_delay, int64_t total_duration_ms, int64_t expected_buffers)
+static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width, int auto_rx_delay, int64_t timeout_ms, int64_t expected_buffers, int64_t max_errors)
 {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1, .use_writer = 1};
     dma.loopback = external_loopback ? 0 : 1;
@@ -391,7 +391,9 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
     int i = 0;
     int64_t reader_sw_count_last = 0;
     int64_t start_time, last_print_time;
-    uint32_t errors = 0;
+    int64_t errors = 0;
+    int64_t last_errors = 0;
+    int return_value = 0;
 
 #ifdef DMA_CHECK_DATA
     uint32_t seed_wr = 0;
@@ -412,10 +414,15 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
     signal(SIGINT, intHandler);
 
     printf("\e[1m[> DMA loopback test:\e[0m\n");
-    printf("---------------------\n");
 
     if (litepcie_dma_init(&dma, litepcie_device, zero_copy, cuda_device_num >= 0))
         exit(1);
+    // We purposefully put this afterward, so we can visually see we passed `litepcie_dma_init()`.
+    printf("---------------------\n");
+
+    // Disable the DMA synchronizer, as we want this loopback to be independent of anything else:
+    litepcie_writel(dma.fds.fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 1);
+    litepcie_writel(dma.fds.fd, CSR_PCIE_DMA0_SYNCHRONIZER_ENABLE_ADDR, 0b10);
 
 #if defined(DMA_CHECK_DATA) && defined(CUDA)
     if (cuda_device_num >= 0) {
@@ -487,23 +494,28 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
                 memset(buf_rd, 0, DMA_BUFFER_SIZE);
             } else {
                 /* Find initial Delay/Seed (Useful when loopback is introducing delay). */
-                uint32_t errors_min = 0xffffffff;
+                int error_thresh = (DMA_BUFFER_SIZE / sizeof(uint32_t)) / 2;
+                printf("Calibrating RX_DELAY; searching for errors < %d\n", error_thresh);
+                int64_t errors_min = INT64_MAX;
                 for (int delay = 0; delay < DMA_BUFFER_SIZE / sizeof(uint32_t); delay++) {
                     seed_rd = delay;
                     errors = check_pn_data((uint32_t *) buf_rd, DMA_BUFFER_SIZE / sizeof(uint32_t), &seed_rd, data_width);
-                    //printf("delay: %d / errors: %d\n", delay, errors);
+                    printf(" -> delay: %d / errors: %d\n", delay, errors);
                     if (errors < errors_min)
                         errors_min = errors;
-                    if (errors < (DMA_BUFFER_SIZE / sizeof(uint32_t)) / 2) {
-                        printf("RX_DELAY: %d (errors: %d)\n", delay, errors);
+                    if (errors < error_thresh) {
+                        printf("  -> GOOD RX_DELAY: %d (errors: %" PRIu64 ")\n", delay, errors);
                         run = 1;
+                        start_time = get_time_ms();
+                        errors = 0;
                         break;
                     }
                 }
                 if (!run) {
-                    printf("Unable to find DMA RX_DELAY (min errors: %d/%ld), exiting.\n",
+                    printf("Unable to find DMA RX_DELAY (min errors: %" PRIu64 "/%ld), exiting.\n",
                         errors_min,
                         DMA_BUFFER_SIZE / sizeof(uint32_t));
+                    return_value = 1;
                     goto end;
                 }
             }
@@ -516,39 +528,42 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
         if (run && ((curr_time - last_print_time) > 200)) {
             /* Print banner every 10 lines. */
             if (i % 10 == 0)
-                printf("\e[1mDMA_SPEED(Gbps)\tTX_BUFFERS\tRX_BUFFERS\tLOADED\tRX_BUFFERS/SEC\tERRORS\e[0m\n");
+                printf("\e[1mDMA_SPEED(Gbps)\tTX_BUFFERS (+ INFLIGHT)\tRX_BUFFERS (+ INFLIGHT)\tRX_BUFFERS/SEC\tERRORS\e[0m\n");
             i++;
             /* Print statistics. */
-            printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%4" PRIu64 "\t%.1f\t%6u\n",
+            printf("%14.2f\t%10" PRIu64 " (+ %8" PRIu64 ")\t%10" PRIu64 " (+ %8" PRIu64 ")\t%14.1f\t%6" PRIu64 "\n",
                    (double)(dma.reader_sw_count - reader_sw_count_last) * DMA_BUFFER_SIZE * 8 * data_width / (get_next_pow2(data_width) * (double)(curr_time - last_print_time) * 1e6),
                    dma.reader_sw_count,
+                   dma.reader_sw_count - dma.reader_hw_count,
                    dma.writer_sw_count,
-                   dma.reader_sw_count - dma.writer_sw_count,
+                   dma.writer_hw_count - dma.writer_sw_count,
                    dma.writer_sw_count*1000.0/(curr_time - start_time),
-                   errors);
+                   errors - last_errors);
             /* Update errors/time/count. */
-            errors = 0;
+            last_errors = errors;
             last_print_time = curr_time;
             reader_sw_count_last = dma.reader_sw_count;
         }
 
         /* If we've been given a total duration, use it to set `keep_running` here.*/
-        if (run && (total_duration_ms > 0) && ((curr_time - start_time) > total_duration_ms)) {
+        if (run && (timeout_ms > 0) && ((curr_time - start_time) > timeout_ms)) {
             keep_running = 0;
         }
     }
 
-    float avg_buffers_per_second;
+    /* If  we go this far*/
+    if (dma.reader_sw_count < expected_buffers) {
+        printf("FAILING dma_test buffer count (%" PRIu64 ") < (%" PRIu64 ")", dma.reader_sw_count, expected_buffers);
+        return_value = 1;
+    }
+    if (errors > max_errors) {
+        printf("FAILING dma_test error count (%" PRIu64 ") > (%" PRIu64 ")", errors, max_errors);
+        return_value = 1;
+    }
 end:
     /* Cleanup DMA. */
-    avg_buffers_per_second = dma.reader_sw_count * 1000.0 / (get_time_ms() - start_time);
     litepcie_dma_cleanup(&dma);
-
-    /* If we have been given either an expected buffer count, fail the test if we have not transferred enough. */
-    if (expected_buffers > 0 && (dma.reader_sw_count < expected_buffers)) {
-        return 1;
-    }
-    return 0;
+    return return_value;
 }
 
 /* UART */
@@ -662,6 +677,64 @@ void lms7002m_reset(void)
     close(fd);
 }
 
+const char * size_to_format(int size) {
+    static char format[32];
+    sprintf(format, "0x%%0%dllx", size/4);
+    return &format[0];
+}
+
+void csr_dump(void) {
+    int fd;
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    uint32_t last_region = (uint32_t)-1;
+    uint32_t curr_field_idx = 0;
+    for (uint32_t csr_idx=0; csr_idx < CSR_METADATA_LEN; csr_idx++) {
+        // Print out region headers
+        struct CSRRegionMetadata region = CSR_REGION_METADATA[CSR_METADATA[csr_idx].region_index];
+        struct CSRMetadata csr = CSR_METADATA[csr_idx];
+        if (last_region != csr.region_index) {
+            last_region = csr.region_index;
+            printf("[%s]\n", region.name);
+        }
+
+        // Seek through our fields to the current CSR (useful in case there are gaps)
+        while (curr_field_idx < CSR_FIELDS_LEN && CSR_FIELD_METADATA[curr_field_idx].csr_index < csr_idx) {
+            curr_field_idx++;
+        }
+
+        // Read the CSR register. Note we need to explicitly handle word size here, since
+        // `litepcie_readl()` always returns a `uint32_t`...
+        unsigned long long word = 0;
+        for (int word_idx=0; word_idx < (csr.size + 8*sizeof(uint32_t) - 1)/(8*sizeof(uint32_t)); word_idx++) {
+            word = (word << 8*sizeof(uint32_t)) | litepcie_readl(fd, csr.addr + sizeof(uint32_t)*word_idx);
+        }
+
+        // Dump the CSR value, and all fields it may contain
+        // Use `format` here to build a dynamic format to contain the correct number of leading zeros in CSR values
+        printf(" - [%02d] %s.%s: ", csr.size, region.name, csr.name);
+        printf(size_to_format(csr.size), word);
+
+        // Warn the user if we've attempted to read something that doesn't fit into `word`:
+        if (sizeof(unsigned long long) < csr.size/8) {
+            printf(" <- LARGER THAN HOST WORD SIZE, LIKELY CORRUPTED\n");
+        } else {
+            printf("\n");
+        }
+
+        while (curr_field_idx < CSR_FIELDS_LEN && CSR_FIELD_METADATA[curr_field_idx].csr_index == csr_idx) {
+            struct CSRFieldMetadata field = CSR_FIELD_METADATA[curr_field_idx];
+            printf("   - [%02d] %s: ", field.size, field.name);
+            printf(size_to_format(field.size), CSR_EXTRACT_FIELD(word, field));
+            printf("\n");
+            curr_field_idx++;
+        }
+    }
+}
 
 void lms7002m_dump(void)
 {
@@ -746,7 +819,9 @@ static void help(void)
            "-e                                Use external loopback (default = internal).\n"
            "-w data_width                     Width of data bus (default = 16).\n"
            "-a                                Automatic DMA RX-Delay calibration.\n"
-           "-t timeout                        Automatic timeout in milliseconds (default = 0).\n"
+           "-t timeout                        Automatic timeout in milliseconds (default = infinite).\n"
+           "-b expected_buffers               Minimum number of buffers tolerated in DMA test (default = 0)\n"
+           "-x max_errors                     Maximum errors tolerated in DMA test (default = no max)\n"
            "\n"
            "available commands:\n"
            "info                              Get Board information.\n"
@@ -757,6 +832,7 @@ static void help(void)
            "uart_test                         Test CPU Crossover UART\n"
 #endif
            "gps_test                          Test GPS\n"
+           "csr_dump                          Dump all CSRs\n"
            "\n"
            "lms_reset                         Reset LMS7002M\n"
            "lms_dump                          Dump LMS7002M registers\n"
@@ -783,22 +859,24 @@ int main(int argc, char **argv)
     static uint8_t litepcie_device_external_loopback;
     static int litepcie_data_width;
     static int litepcie_auto_rx_delay;
-    static int64_t total_duration_ms;
+    static int64_t timeout_ms;
     static int64_t expected_buffer_count;
+    static int64_t max_errors;
 
     litepcie_device_num = 0;
     litepcie_data_width = 16;
     litepcie_auto_rx_delay = 0;
     litepcie_device_zero_copy = 0;
     litepcie_device_external_loopback = 0;
-    total_duration_ms = 0;
+    timeout_ms = INT64_MAX;
     expected_buffer_count = 0;
+    max_errors = INT64_MAX;
 
     cuda_device_num = -1;
 
     /* Parameters. */
     for (;;) {
-        c = getopt(argc, argv, "hc:g:w:t:b:r:zea");
+        c = getopt(argc, argv, "hc:g:w:t:b:x:zea");
         if (c == -1)
             break;
         switch(c) {
@@ -812,7 +890,7 @@ int main(int argc, char **argv)
             litepcie_data_width = atoi(optarg);
             break;
         case 't':
-            total_duration_ms = atoi(optarg);
+            timeout_ms = atoi(optarg);
             break;
         case 'z':
             litepcie_device_zero_copy = 1;
@@ -828,6 +906,9 @@ int main(int argc, char **argv)
             break;
         case 'b':
             expected_buffer_count = atoi(optarg);
+            break;
+        case 'x':
+            max_errors = atoi(optarg);
             break;
         default:
             exit(1);
@@ -857,6 +938,8 @@ int main(int argc, char **argv)
     else if (!strcmp(cmd, "gps_test"))
         gps_test();
     /* SPI Flash cmds. */
+    else if (!strcmp(cmd, "csr_dump"))
+        csr_dump();
 #if CSR_FLASH_BASE
     else if (!strcmp(cmd, "flash_write")) {
         const char *filename;
@@ -885,13 +968,14 @@ int main(int argc, char **argv)
 #endif
     /* DMA cmds. */
     else if (!strcmp(cmd, "dma_test"))
-        dma_test(
+        return dma_test(
             litepcie_device_zero_copy,
             litepcie_device_external_loopback,
             litepcie_data_width,
             litepcie_auto_rx_delay,
-            total_duration_ms,
-            expected_buffer_count);
+            timeout_ms,
+            expected_buffer_count,
+            max_errors);
     /* LMS7002M cmds. */
     else if (!strcmp(cmd, "lms_reset"))
         lms7002m_reset();

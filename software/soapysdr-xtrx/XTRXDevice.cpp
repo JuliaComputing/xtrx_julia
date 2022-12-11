@@ -1504,6 +1504,12 @@ void SoapyXTRX::vctcxo_dac_set(int value) {
     }
 }
 
+const char * size_to_format(int size) {
+    static char format[32];
+    sprintf(format, "0x%%0%dllx", size/4);
+    return &format[0];
+}
+
 /*
 Dump the LiteX registers in an INI format similar to the one used by limesuite
 */
@@ -1513,26 +1519,47 @@ void SoapyXTRX::dump_litex_regs(std::string filename) {
         printf("Failed to open file %s)", filename.c_str());
         return;
     }
-    struct csr_block {
-        uint32_t addr;
-        std::string name;
-        uint32_t length;
-    };
+    uint32_t last_region = (uint32_t)-1;
+    uint32_t curr_field_idx = 0;
+    for (uint32_t csr_idx=0; csr_idx < CSR_METADATA_LEN; csr_idx++) {
+        // Print out region headers
+        struct CSRRegionMetadata region = CSR_REGION_METADATA[CSR_METADATA[csr_idx].region_index];
+        struct CSRMetadata csr = CSR_METADATA[csr_idx];
+        if (last_region != csr.region_index) {
+            last_region = csr.region_index;
+            fprintf(f, "[%s]\n", region.name);
+        }
 
-    std::vector<csr_block> reg_addrs = {
-        {CSR_VCTCXO_BASE, "VCTCXO", 0x08},
-        {CSR_RF_SWITCHES_BASE, "RF_SWITCHES", 0x04},
-        {CSR_LMS7002M_BASE, "LMS", 0x2c},
-    };
-    fprintf(f, "[FILE INFO]\ntype=litex csr configuration\nversion=1.0\n");
+        // Seek through our fields to the current CSR (useful in case there are gaps)
+        while (curr_field_idx < CSR_FIELDS_LEN && CSR_FIELD_METADATA[curr_field_idx].csr_index < csr_idx) {
+            curr_field_idx++;
+        }
 
-    for (auto csr : reg_addrs)
-    {
-        fprintf(f, "[%s]\n", csr.name.c_str());
-        for (uint32_t i = 0; i < csr.length; i=i+4) {
-            uint32_t addr = csr.addr + i;
-            uint32_t val = litepcie_readl(_fd, addr);
-            fprintf(f, "0x%02x=0x%08x\n", addr, val);
+        // Read the CSR register. Note we need to explicitly handle word size here, since
+        // `litepcie_readl()` always returns a `uint32_t`...
+        unsigned long long word = 0;
+        for (int word_idx=0; word_idx < (csr.size + 8*sizeof(uint32_t) - 1)/(8*sizeof(uint32_t)); word_idx++) {
+            word = (word << 8*sizeof(uint32_t)) | litepcie_readl(_fd, csr.addr + sizeof(uint32_t)*word_idx);
+        }
+
+        // Dump the CSR value, and all fields it may contain
+        // Use `format` here to build a dynamic format to contain the correct number of leading zeros in CSR values
+        fprintf(f, "%s.%s: ", region.name, csr.name);
+        fprintf(f, size_to_format(csr.size), word);
+
+        // Warn the user if we've attempted to read something that doesn't fit into `word`:
+        if (sizeof(unsigned long long) < csr.size/8) {
+            fprintf(f, " <- LARGER THAN HOST WORD SIZE, LIKELY CORRUPTED\n");
+        } else {
+            fprintf(f, "\n");
+        }
+
+        while (curr_field_idx < CSR_FIELDS_LEN && CSR_FIELD_METADATA[curr_field_idx].csr_index == csr_idx) {
+            struct CSRFieldMetadata field = CSR_FIELD_METADATA[curr_field_idx];
+            fprintf(f, "%s.%s.%s: ", region.name, csr.name, field.name);
+            fprintf(f, size_to_format(field.size), CSR_EXTRACT_FIELD(word, field));
+            fprintf(f, "\n");
+            curr_field_idx++;
         }
     }
     fclose(f);
