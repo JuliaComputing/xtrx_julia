@@ -30,6 +30,11 @@ Note that we currently carry [our own patch for resizing the addressable memory 
 [> Getting started
 ------------------
 
+### [> Hardware
+- XTRX (Rev4 and 5, pro and non-pro variants all supported)
+- XTRX PCIE Carrier board (to access JTAG)
+- JTAG HS2 programmer from Digilent
+
 ### [> Initialize Git submodules:
 
 Git submodules are used to track various upstream software sources.
@@ -45,8 +50,15 @@ git submodule update
 LiteX can be installed by following the installation instructions from the LiteX
 Wiki: https://github.com/enjoy-digital/litex/wiki/Installation
 
-Be sure to use the latest master branch of the LiteX sources, as none of the
-currently-available tags include some of the changes we require.
+The latest master branch of the LiteX sources is preferrable,
+though regressions and API changes are possible.
+
+To use a known-good LiteX version the following script can set the
+appropriate git checkouts:
+
+```
+./apply_litex_manifest.sh path/to/litex
+```
 
 ### [> Installing the RISC-V toolchain for the Soft-CPU:
 
@@ -61,11 +73,32 @@ LiteX's wiki: https://github.com/enjoy-digital/litex/wiki/Installation:
 [> Build and Test the design
 ----------------------------
 
-Build the design and flash it to the board:
+![](./doc/program_setup.jpg)
+
+The gateware supports rev4/rev5 and pro/non-pro variants of the XTRX board.
+The differences between rev4 and rev5 are detected and handled by the embedded
+firmware running on the VexRISC core, so no gateware configuration is required.
+
+However, for pro and non-pro variants a configuration is required, see below.
+
+In addition the PCIe bus width defaults to 64 Bit. For a single device,
+32 bits is sufficent and preferred.
+
+Example: Build the design and flash it to the board (Pro, 64 bit PCIe width):
 
 ```
 ./fairwaves_xtrx.py --build --flash
 ```
+
+Example: Build the design and flash it to the board (Non-Pro, 32 bit PCIe width):
+
+```
+./fairwaves_xtrx.py --build --flash --nonpro --address_width=32
+```
+
+This will program over JTAG. On linux you will need to set the appropriate udev rules.
+Sometimes when migrating from the original XTRX gateware it is required to power over the
+USB on the XTRX, rather than PCIe (as shown in the picture above).
 
 Build the Linux kernel driver and load it.
 Note that by default, the current live kernel will be built against, but you can cross-compile for a target kernel version by setting `USE_LIVE_KERNEL=false`.
@@ -74,6 +107,8 @@ Note that by default, the current live kernel will be built against, but you can
 make -C software litepcie-kernel-module
 sudo software/litepcie-kernel-module/init.sh
 ```
+
+CUDA support can be disabled by commenting out the following line: https://github.com/JuliaComputing/xtrx_julia/blob/b448549ee128956e6066afbb3e1ee69e895737c5/software/litepcie-kernel-module/main.c#L43
 
 Note that if a thunderbolt carrier is in use, it may be necessary rescan the pci bus:
 
@@ -107,8 +142,8 @@ sudo ./test/reset.sh
 [> User-space software
 ----------------------
 
-To interface with the LMS7002M chip, we provide a SoapySDR driver. This driver
-is in turn built on top of [MyriadRF's LMS7002M driver
+To interface with the LMS7002M chip, we provide SoapySDR drivers.
+One driver is built on top of [MyriadRF's LMS7002M driver
 library](https://github.com/myriadrf/LMS7002M-driver), which is downloaded and
 installed automatically when you compile the SoapySDR driver:
 
@@ -121,6 +156,20 @@ to omit CUDA use:
 ```
 make -C software soapysdr-xtrx -j$(nproc) USE_CUDA=false
 ```
+
+The other driver uses the LimeSuite library:
+
+```
+make -C software soapysdr-xtrx-lime -j$(nproc)
+```
+
+to omit CUDA use:
+
+```
+make -C software soapysdr-xtrx-lime -j$(nproc) USE_CUDA=false
+```
+
+Each is selectable with the appropriate `driver` filters when using SoapySDR.
 
 [> Julia Interfaces
 -------------------
@@ -142,16 +191,19 @@ cd software/scripts
 julia --project test_pattern.jl
 ```
 
+You can then run it out of the `build/soapysdr/bin` directory.  Note that we
+install to the `soapysdr` directory to simplify the path manipulation needed
+for SoapySDR module autodetection.
+
+[> LimeSuite Interface
+----------------------
+
 There is also a modified version of LimeSuite available that makes it possible
 to interactively configure the LMS7002M:
 
 ```
 make -C software limesuite -j$(nproc)
 ```
-
-You can then run it out of the `build/soapysdr/bin` directory.  Note that we
-install to the `soapysdr` directory to simplify the path manipulation needed
-for SoapySDR module autodetection.
 
 [> Development
 --------------
