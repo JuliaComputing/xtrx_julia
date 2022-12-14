@@ -742,7 +742,7 @@ end
 function collect_single_chunk_at(in::MatrixSizedChannel{T}; counter_threshold::Int = 1000) where {T <: Number}
     buffs = Matrix{T}(undef, in.num_samples, in.num_antenna_channels)
     counter = 0
-    Base.errormonitor(Threads.@spawn begin 
+    spawn_event = Base.errormonitor(Threads.@spawn begin 
         consume_channel(in) do buff
             if counter == counter_threshold
                 buffs .= buff
@@ -750,7 +750,7 @@ function collect_single_chunk_at(in::MatrixSizedChannel{T}; counter_threshold::I
             counter += 1
         end
     end)
-    return buffs
+    return buffs, spawn_event
 end
 
 end # module LibSigflow
