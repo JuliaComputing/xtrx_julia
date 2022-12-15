@@ -98,7 +98,7 @@ void dma_set_loopback(int fd, bool loopback_enable) {
 
 SoapyXTRX::SoapyXTRX(const ConnectionHandle &handle, const SoapySDR::Kwargs &args)
     : _fd(-1),
-      _lms(NULL), _masterClockRate(80.0e6), _refClockRate(26e6), oversampling(0) {
+      _lms(NULL), _masterClockRate(80.0e6), oversampling(0) {
     LMS7_set_log_handler(&customLogHandler);
     LMS7_set_log_level(LMS7_TRACE);
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyXTRX initializing...");
@@ -866,6 +866,7 @@ double SoapyXTRX::getTSPRate() const {
     return _masterClockRate / 4;
 }
 
+/*
 void SoapyXTRX::setMasterClockRate(const double rate) {
     std::lock_guard<std::mutex> lock(_mutex);
 
@@ -879,6 +880,7 @@ void SoapyXTRX::setMasterClockRate(const double rate) {
     SoapySDR::logf(SOAPY_SDR_TRACE, "LMS7002M_set_data_clock(%f MHz) -> %f MHz",
                    rate / 1e6, _masterClockRate / 1e6);
 }
+*/
 
 double SoapyXTRX::getMasterClockRate(void) const
 {
@@ -891,14 +893,16 @@ double SoapyXTRX::getMasterClockRate(void) const
  * \param rate the clock rate in Hz
  */
 void SoapyXTRX::setReferenceClockRate(const double rate) {
-    _refClockRate = rate;
+    lms7Device->SetClockFreq(LMS_CLOCK_REF, rate);
 }
 
 /*!
  * Get the reference clock rate of the device.
  * \return the clock rate in Hz
  */
-double SoapyXTRX::getReferenceClockRate(void) const { return _refClockRate; }
+double SoapyXTRX::getReferenceClockRate(void) const {
+    return lms7Device->GetClockFreq(LMS_CLOCK_REF);
+}
 
 /*!
  * Get the range of available reference clock rates.
@@ -1205,7 +1209,7 @@ void SoapyXTRX::writeSetting(const std::string &key, const std::string &value) {
     else if (key == "TRF_ENABLE_LOOPBACK")
         LMS7002M_trf_enable_loopback(_lms, LMS_CHAB, value == "TRUE");
     else if (key == "CGEN")
-        LMS7002M_set_data_clock(_lms, _refClockRate, std::stod(value)*1e6, &_masterClockRate);
+        lms7Device->SetClockFreq(LMS_CLOCK_REF, std::stod(value));
     else if (key == "RXTSP_TSG_CONST") {
         const int ampl = std::stoi(value);
         LMS7002M_rxtsp_tsg_const(_lms, LMS_CHAB, ampl, 0);
