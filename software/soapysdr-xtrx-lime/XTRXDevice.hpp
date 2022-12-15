@@ -192,8 +192,6 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
     std::map<int, std::map<size_t, double>> _cachedFilterBws;
 
     // Clocking API
-    double getTSPRate() const;
-    void setMasterClockRate(const double rate) override;
     double getMasterClockRate(void) const override;
     void setReferenceClockRate(const double rate) override;
     double getReferenceClockRate(void) const override;
@@ -455,7 +453,6 @@ class DLL_EXPORT SoapyXTRX : public SoapySDR::Device {
 
     int _fd;
     LMS7002M_t *_lms;
-    double _masterClockRate;
     std::string _clockSource;
 
     // calibration data

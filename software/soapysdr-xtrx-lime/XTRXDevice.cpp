@@ -38,6 +38,13 @@
 
 using namespace lime;
 
+//reasonable fallback limits when advertising the rate
+#define MIN_FALLBACK_SAMP_RATE 1e5
+#define MAX_FALLBACK_SAMP_RATE 65e6
+
+//reasonable step between sample rates
+#define STEP_SAMP_RATE 5e5
+
 #define dirName ((direction == SOAPY_SDR_RX)?"Rx":"Tx")
 
 void customLogHandler(const LMS7_log_level_t level, const char *message) {
@@ -97,8 +104,7 @@ void dma_set_loopback(int fd, bool loopback_enable) {
 }
 
 SoapyXTRX::SoapyXTRX(const ConnectionHandle &handle, const SoapySDR::Kwargs &args)
-    : _fd(-1),
-      _lms(NULL), _masterClockRate(80.0e6), oversampling(0) {
+    : _fd(-1), _lms(NULL), oversampling(0) {
     LMS7_set_log_handler(&customLogHandler);
     LMS7_set_log_level(LMS7_TRACE);
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyXTRX initializing...");
@@ -173,6 +179,8 @@ SoapyXTRX::SoapyXTRX(const ConnectionHandle &handle, const SoapySDR::Kwargs &arg
     SoapySDR::logf(SOAPY_SDR_INFO, "Device name: %s", devInfo->deviceName);
     SoapySDR::logf(SOAPY_SDR_INFO, "Reference: %g MHz", lms7Device->GetClockFreq(LMS_CLOCK_REF)/1e6);
 
+    // setup LMS7002M
+    _lms = LMS7002M_create(litepcie_interface_transact, &_fd);
 
     lms7Device->Init();
 
@@ -209,9 +217,6 @@ SoapyXTRX::SoapyXTRX(const ConnectionHandle &handle, const SoapySDR::Kwargs &arg
     mChannels[SOAPY_SDR_TX].resize(lms7Device->GetNumChannels());
     _channelsToCal.clear();
     activeStreams.clear();
-
-    // setup LMS7002M
-    _lms = LMS7002M_create(litepcie_interface_transact, &_fd);
 /*
     LMS7002M_reset(_lms);
     LMS7002M_set_spi_mode(_lms, 4);
@@ -740,14 +745,33 @@ double SoapyXTRX::getSampleRate(const int direction, const size_t channel) const
     return lms7Device->GetRate((direction == SOAPY_SDR_TX),channel);
 }
 
-std::vector<double> SoapyXTRX::listSampleRates(const int /*direction*/,
-                                               const size_t) const {
-    const double baseRate = this->getTSPRate();
+std::vector<double> SoapyXTRX::listSampleRates(const int direction, const size_t channel) const
+{
     std::vector<double> rates;
-    // from baseRate/32 to baseRate/2
-    for (int i = 5; i >= 1; i--) {
-        rates.push_back(baseRate / (1 << i));
+
+    lms_range_t range;
+    if (LMS_GetSampleRateRange(lms7Device, direction == SOAPY_SDR_RX, &range))
+    {
+        SoapySDR::log(SOAPY_SDR_ERROR, "LMS_GetSampleRate() failed, using fallback values.");
+
+        range.min = MIN_FALLBACK_SAMP_RATE;
+        range.max = MAX_FALLBACK_SAMP_RATE;
+        range.step = 0;
     }
+
+    //if default step is less than the minimum allowed by the device just use the latter
+    double step = std::max(STEP_SAMP_RATE, range.step);
+
+    //insert range.min if its not a step factor
+    if (std::fmod(range.min, step))
+        rates.push_back(range.min);
+
+    //round the first rate to step factor to get nicer sample rates
+    for (auto rate = std::ceil(range.min / step) * step; rate < range.max; rate += step)
+        rates.push_back(rate);
+
+    rates.push_back(range.max);
+
     return rates;
 }
 
@@ -861,10 +885,6 @@ std::vector<double> SoapyXTRX::listBandwidths(const int direction,
 /*******************************************************************
  * Clocking API
  ******************************************************************/
-
-double SoapyXTRX::getTSPRate() const {
-    return _masterClockRate / 4;
-}
 
 /*
 void SoapyXTRX::setMasterClockRate(const double rate) {
