@@ -193,7 +193,7 @@ function stream_data(s_rx1::SoapySDR.Stream{T}, s_rx2::SoapySDR.Stream{T},
                      kwargs...) where {T <: Number}
     # Wrapper to activate/deactivate `s_rx`
     num_samples = max(s_rx1.mtu, s_rx2.mtu)
-    num_channels = s_rx1.nchannels + s_rx2.channels
+    num_channels = s_rx1.nchannels + s_rx2.nchannels
     wrapper = (f) -> begin
         buff = Matrix{T}(undef, num_samples, num_channels)
 
@@ -231,11 +231,11 @@ function stream_data(s_rx1::SoapySDR.Stream{T}, s_rx2::SoapySDR.Stream{T},
             if e isa SoapySDR.SoapySDRDeviceError
                 if e.status == SoapySDR.SOAPY_SDR_OVERFLOW
                     _num_overflows[] += 1
-                    print("O1")
+                    print("O₁")
                 elseif e.status == SoapySDR.SOAPY_SDR_TIMEOUT
-                    print("Tᵣ1")
+                    print("Tᵣ₁")
                 else
-                    print("Eᵣ1")
+                    print("Eᵣ₁")
                 end
             else
                 rethrow(e)
@@ -249,11 +249,11 @@ function stream_data(s_rx1::SoapySDR.Stream{T}, s_rx2::SoapySDR.Stream{T},
             if e isa SoapySDR.SoapySDRDeviceError
                 if e.status == SoapySDR.SOAPY_SDR_OVERFLOW
                     _num_overflows[] += 1
-                    print("O2")
+                    print("O₂")
                 elseif e.status == SoapySDR.SOAPY_SDR_TIMEOUT
-                    print("Tᵣ2")
+                    print("Tᵣ₂")
                 else
-                    print("Eᵣ2")
+                    print("Eᵣ₂")
                 end
             else
                 rethrow(e)

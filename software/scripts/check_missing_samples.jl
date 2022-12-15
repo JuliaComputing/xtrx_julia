@@ -187,22 +187,16 @@ function eval_missing_samples_over_multiple_devices(;
 )
     num_samples_to_track = Int(upreferred(sample_rate * 1u"ms"))
 
-    device_kwargs1 = Dict{Symbol,Any}()
-    if chomp(String(read(`hostname`))) == "pathfinder"
-        device_kwargs1[:driver] = "XTRX"
-        device_kwargs1[:serial] = "12cc5241b88485c"
-    end
-    device_kwargs2 = Dict{Symbol,Any}()
-    if chomp(String(read(`hostname`))) == "pathfinder"
-        device_kwargs2[:driver] = "XTRX"
-        device_kwargs2[:serial] = "30c5241b884854"
-    end
+    # Do not run Devices twice
+    devs = collect(Devices())
+    dev1 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "12cc5241b88485c", devs)))
+    dev2 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "30c5241b884854", devs)))
 
-    dev1 = Device(first(Devices(;device_kwargs1...)))
-    dev2 = Device(first(Devices(;device_kwargs2...)))
     try
         format = dev1.rx[1].native_stream_format
         fullscale = dev1.tx[1].fullscale
+        dev1.clock_source = "external+pps"
+        dev2.clock_source = "external+pps"
 
         # Setup transmitter parameters
         ct = dev1.tx[1]
@@ -211,6 +205,11 @@ function eval_missing_samples_over_multiple_devices(;
         ct.sample_rate = sample_rate
         ct.gain = 50u"dB"
         ct.gain_mode = false
+
+        # Needed for now
+        ct = dev2.tx[1]
+        ct.bandwidth = sample_rate
+        ct.sample_rate = sample_rate
 
         # Setup receive parameters
         for cr in dev1.rx
@@ -229,8 +228,8 @@ function eval_missing_samples_over_multiple_devices(;
             cr.gain_mode = false
         end
 
-        stream_rx1 = SoapySDR.Stream(format, dev1.rx)
         stream_tx = SoapySDR.Stream(format, dev1.tx)
+        stream_rx1 = SoapySDR.Stream(format, dev1.rx)
         stream_rx2 = SoapySDR.Stream(format, dev2.rx)
 
         dma_buffers = (
@@ -299,18 +298,4 @@ function eval_missing_samples_over_multiple_devices(;
         finalize(dev1)
         finalize(dev2)
     end
-end
-
-function collect_single_chunk_at(in::MatrixSizedChannel{T}; counter_threshold::Int = 1000) where {T <: Number}
-    buffs = Matrix{T}(undef, in.num_samples, in.num_antenna_channels)
-    counter = 0
-    Base.errormonitor(Threads.@spawn begin 
-        consume_channel(in) do buff
-            if counter == counter_threshold
-                buffs .= buff
-            end
-            counter += 1
-        end
-    end)
-    return buffs
 end
