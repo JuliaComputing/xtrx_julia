@@ -213,7 +213,7 @@ function eval_missing_samples_over_multiple_devices(;
         ct.bandwidth = sample_rate
         ct.frequency = frequency
         ct.sample_rate = sample_rate
-        ct.gain = 40u"dB"
+        ct.gain = 50u"dB"
         ct.gain_mode = false
 
         # Needed for now
@@ -226,7 +226,7 @@ function eval_missing_samples_over_multiple_devices(;
             cr.bandwidth = sample_rate
             cr.frequency = frequency
             cr.sample_rate = sample_rate
-            cr.gain = 40u"dB"
+            cr.gain = 50u"dB"
             cr.gain_mode = false
         end
 
@@ -234,7 +234,7 @@ function eval_missing_samples_over_multiple_devices(;
             cr.bandwidth = sample_rate
             cr.frequency = frequency
             cr.sample_rate = sample_rate
-            cr.gain = 40u"dB"
+            cr.gain = 50u"dB"
             cr.gain_mode = false
         end
 
