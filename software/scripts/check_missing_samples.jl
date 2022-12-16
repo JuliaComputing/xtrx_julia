@@ -2,8 +2,8 @@
 
 ENV["GKSwstype"] = "100"
 
-using SoapySDR, Printf, Unitful, DSP, LibSigflow, LibSigGUI, Statistics,
-    GNSSSignals, FFTW, LinearAlgebra
+using SoapySDR, Printf, Unitful, DSP, LibSigflow, Statistics,
+    GNSSSignals, FFTW, LinearAlgebra, XTRX
 include("./xtrx_debugging.jl")
 
 if Threads.nthreads() < 2
@@ -189,10 +189,20 @@ function eval_missing_samples_over_multiple_devices(;
 
     # Do not run Devices twice
     devs = collect(Devices())
-    dev1 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "12cc5241b88485c", devs)))
-    dev2 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "30c5241b884854", devs)))
+    dev1 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "4c1c440ea8c85c", devs)))
+    dev2 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "12cc5241b88485c", devs)))
 
     try
+        synchro_dev1 = dev1[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] 
+        synchro_dev2 = dev2[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] 
+        @show synchro_dev1, synchro_dev2
+        dev1[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] = synchro_dev1 | (2 << XTRX.CSRs.CSR_SYNCHRO_CONTROL_INT_SOURCE_OFFSET | 2 << XTRX.CSRs.CSR_SYNCHRO_CONTROL_OUT_SOURCE_OFFSET)
+        dev2[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] = synchro_dev2 | (2 << XTRX.CSRs.CSR_SYNCHRO_CONTROL_INT_SOURCE_OFFSET | 2 << XTRX.CSRs.CSR_SYNCHRO_CONTROL_OUT_SOURCE_OFFSET)
+
+        synchro_dev1 = dev1[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] 
+        synchro_dev2 = dev2[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] 
+        @show synchro_dev1, synchro_dev2
+
         format = dev1.rx[1].native_stream_format
         fullscale = dev1.tx[1].fullscale
         dev1.clock_source = "external+pps"
@@ -203,7 +213,7 @@ function eval_missing_samples_over_multiple_devices(;
         ct.bandwidth = sample_rate
         ct.frequency = frequency
         ct.sample_rate = sample_rate
-        ct.gain = 50u"dB"
+        ct.gain = 40u"dB"
         ct.gain_mode = false
 
         # Needed for now
@@ -216,7 +226,7 @@ function eval_missing_samples_over_multiple_devices(;
             cr.bandwidth = sample_rate
             cr.frequency = frequency
             cr.sample_rate = sample_rate
-            cr.gain = 50u"dB"
+            cr.gain = 40u"dB"
             cr.gain_mode = false
         end
 
@@ -224,7 +234,7 @@ function eval_missing_samples_over_multiple_devices(;
             cr.bandwidth = sample_rate
             cr.frequency = frequency
             cr.sample_rate = sample_rate
-            cr.gain = 50u"dB"
+            cr.gain = 40u"dB"
             cr.gain_mode = false
         end
 
