@@ -21,16 +21,19 @@ function set_libsigflow_verbose(verbose::Bool)
     global _default_verbosity = verbose
 end
 const _num_overflows = Ref{Int64}(0)
+const _num_multi_overflows = [0, 0]
 const _num_underflows = Ref{Int64}(0)
 
 function reset_xflow_stats()
     _num_overflows[] = Int64(0)
     _num_underflows[] = Int64(0)
+    _num_multi_overflows .= Int64(0)
 end
 
 function get_xflow_stats()
     return Dict(
         "overflows" => _num_overflows[],
+        "multi_overflows" => _num_multi_overflows,
         "underflows" => _num_underflows[],
     )
 end
@@ -230,7 +233,7 @@ function stream_data(s_rx1::SoapySDR.Stream{T}, s_rx2::SoapySDR.Stream{T},
         catch e
             if e isa SoapySDR.SoapySDRDeviceError
                 if e.status == SoapySDR.SOAPY_SDR_OVERFLOW
-                    _num_overflows[] += 1
+                    _num_multi_overflows[1] += 1
                     print("O₁")
                 elseif e.status == SoapySDR.SOAPY_SDR_TIMEOUT
                     print("Tᵣ₁")
@@ -248,7 +251,7 @@ function stream_data(s_rx1::SoapySDR.Stream{T}, s_rx2::SoapySDR.Stream{T},
         catch e
             if e isa SoapySDR.SoapySDRDeviceError
                 if e.status == SoapySDR.SOAPY_SDR_OVERFLOW
-                    _num_overflows[] += 1
+                    _num_multi_overflows[2] += 1
                     print("O₂")
                 elseif e.status == SoapySDR.SOAPY_SDR_TIMEOUT
                     print("Tᵣ₂")
@@ -633,17 +636,19 @@ be written to different files. The channel number is appended
 to the filename.
 """
 function write_to_file(in::MatrixSizedChannel{T}, file_path::String) where {T <: Number}
-    type_string = string(T)
-    streams = [open("$file_path$type_string$i.dat", "w") for i in 1:in.num_antenna_channels]
-    try
-        consume_channel(in) do buffs
-            foreach(eachcol(buffs), streams) do buff, stream
-                write(stream, buff)
+    Base.errormonitor(Threads.@spawn begin
+        type_string = string(T)
+        streams = [open("$file_path$type_string$i.dat", "w") for i in 1:in.num_antenna_channels]
+        try
+            consume_channel(in) do buffs
+                foreach(eachcol(buffs), streams) do buff, stream
+                    write(stream, buff)
+                end
             end
+        finally
+            close.(streams)
         end
-    finally
-        close.(streams)
-    end
+    end)
 end
 
 function collect_psd(in::MatrixSizedChannel{T}, freq_size::Integer, buff_size::Integer; accumulation = :max) where {T <: Number}

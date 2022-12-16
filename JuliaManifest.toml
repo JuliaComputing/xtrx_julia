@@ -2,7 +2,7 @@
 
 julia_version = "1.8.3"
 manifest_format = "2.0"
-project_hash = "c28810eb40096dfca0f6f73c42ffe6cd4880f45f"
+project_hash = "37b5e73b58b92347223798788081d36decc7976d"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -518,9 +518,9 @@ version = "0.1.0"
 
 [[deps.GNSSReceiver]]
 deps = ["Acquisition", "GNSSDecoder", "GNSSSignals", "JLD2", "LinearAlgebra", "PositionVelocityTime", "REPL", "SoapySDR", "StaticArrays", "Term", "Tracking", "UnicodePlots", "Unitful"]
-git-tree-sha1 = "44ed40120d8d91b5533e3f01d6112fda54a4dee0"
+git-tree-sha1 = "07a0608388f004c5e2b41df15c2f86b5ef6d4e22"
 uuid = "c84cffac-6943-4fe6-9449-f6d23817af8b"
-version = "0.1.3"
+version = "0.1.4"
 
 [[deps.GNSSSignals]]
 deps = ["CUDA", "DocStringExtensions", "FixedPointNumbers", "Statistics", "Unitful"]
