@@ -1,6 +1,6 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.8.3"
+julia_version = "1.8.2"
 manifest_format = "2.0"
 project_hash = "37b5e73b58b92347223798788081d36decc7976d"
 
@@ -17,9 +17,9 @@ version = "0.4.3"
 
 [[deps.Acquisition]]
 deps = ["DocStringExtensions", "FFTW", "GNSSSignals", "LinearAlgebra", "LoopVectorization", "RecipesBase", "Statistics", "Unitful"]
-git-tree-sha1 = "cdb2709a78fbb71861a4fb0e556d3863a692eb11"
+git-tree-sha1 = "4a2196439ed42a2a9f1096b987f29d426f0a587a"
 uuid = "d4bbf60b-102b-5ffb-8f97-a7ea5817e69f"
-version = "0.0.5"
+version = "0.1.0"
 
 [[deps.Adapt]]
 deps = ["LinearAlgebra"]
@@ -235,9 +235,9 @@ version = "0.9.9"
 
 [[deps.Colors]]
 deps = ["ColorTypes", "FixedPointNumbers", "Reexport"]
-git-tree-sha1 = "73e9c4144410f6b11f2f818488728d3afd60943c"
+git-tree-sha1 = "fc08e5930ee9a4e03f84bfb5211cb54e7769758a"
 uuid = "5ae59095-9a9b-59fe-a467-6f913c188581"
-version = "0.12.9"
+version = "0.12.10"
 
 [[deps.CommonSubexpressions]]
 deps = ["MacroTools", "Test"]
@@ -293,9 +293,9 @@ uuid = "717857b8-e6f2-59f4-9121-6e50c889abd2"
 version = "0.7.5"
 
 [[deps.DataAPI]]
-git-tree-sha1 = "e08915633fcb3ea83bf9d6126292e5bc5c739922"
+git-tree-sha1 = "e8119c1a33d267e16108be441a287a6981ba1630"
 uuid = "9a962f9c-6df0-11e9-0e5d-c546b8b5ee8a"
-version = "1.13.0"
+version = "1.14.0"
 
 [[deps.DataDeps]]
 deps = ["BinaryProvider", "HTTP", "Libdl", "Reexport", "SHA", "p7zip_jll"]
@@ -518,9 +518,11 @@ version = "0.1.0"
 
 [[deps.GNSSReceiver]]
 deps = ["Acquisition", "GNSSDecoder", "GNSSSignals", "JLD2", "LinearAlgebra", "PositionVelocityTime", "REPL", "SoapySDR", "StaticArrays", "Term", "Tracking", "UnicodePlots", "Unitful"]
-git-tree-sha1 = "07a0608388f004c5e2b41df15c2f86b5ef6d4e22"
+git-tree-sha1 = "71420f31c262e42805d32295eb5f0e94919da356"
+repo-rev = "ss/fast-re-acquire"
+repo-url = "https://github.com/JuliaGNSS/GNSSReceiver.jl.git"
 uuid = "c84cffac-6943-4fe6-9449-f6d23817af8b"
-version = "0.1.4"
+version = "0.1.5"
 
 [[deps.GNSSSignals]]
 deps = ["CUDA", "DocStringExtensions", "FixedPointNumbers", "Statistics", "Unitful"]
@@ -1013,9 +1015,9 @@ uuid = "56ddb016-857b-54e1-b83d-db4d58db5568"
 
 [[deps.LoopVectorization]]
 deps = ["ArrayInterface", "ArrayInterfaceCore", "ArrayInterfaceOffsetArrays", "ArrayInterfaceStaticArrays", "CPUSummary", "ChainRulesCore", "CloseOpenIntervals", "DocStringExtensions", "ForwardDiff", "HostCPUFeatures", "IfElse", "LayoutPointers", "LinearAlgebra", "OffsetArrays", "PolyesterWeave", "SIMDDualNumbers", "SIMDTypes", "SLEEFPirates", "SnoopPrecompile", "SpecialFunctions", "Static", "ThreadingUtilities", "UnPack", "VectorizationBase"]
-git-tree-sha1 = "da5317a78e2a9f692730345cf3ff820109f406d3"
+git-tree-sha1 = "f63e9022be00102b6d135b3363680e5befa8e227"
 uuid = "bdcacae8-1622-11e9-2a5c-532679323890"
-version = "0.12.141"
+version = "0.12.142"
 
 [[deps.LsqFit]]
 deps = ["Distributions", "ForwardDiff", "LinearAlgebra", "NLSolversBase", "OptimBase", "Random", "StatsBase"]
@@ -1319,9 +1321,9 @@ version = "0.5.2"
 
 [[deps.Plots]]
 deps = ["Base64", "Contour", "Dates", "Downloads", "FFMPEG", "FixedPointNumbers", "GR", "JLFzf", "JSON", "LaTeXStrings", "Latexify", "LinearAlgebra", "Measures", "NaNMath", "Pkg", "PlotThemes", "PlotUtils", "Preferences", "Printf", "REPL", "Random", "RecipesBase", "RecipesPipeline", "Reexport", "RelocatableFolders", "Requires", "Scratch", "Showoff", "SnoopPrecompile", "SparseArrays", "Statistics", "StatsBase", "UUIDs", "UnicodeFun", "Unzip"]
-git-tree-sha1 = "dadd6e31706ec493192a70a7090d369771a9a22a"
+git-tree-sha1 = "513084afca53c9af3491c94224997768b9af37e8"
 uuid = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
-version = "1.37.2"
+version = "1.38.0"
 
 [[deps.PolyesterWeave]]
 deps = ["BitTwiddlingConvenienceFunctions", "CPUSummary", "IfElse", "Static", "ThreadingUtilities"]
@@ -1584,9 +1586,9 @@ version = "0.1.0+0"
 
 [[deps.SoapySDR]]
 deps = ["CEnum", "Intervals", "Unitful", "soapysdr_jll"]
-git-tree-sha1 = "7c19fdc0ccdd6aa1df3efe55f85fab54d10cc9d6"
+path = "software/SoapySDR.jl"
 uuid = "4fa426e6-03fd-45b2-b2dd-25f726820c03"
-version = "0.4.1"
+version = "0.5.0"
 
 [[deps.Sockets]]
 uuid = "6462fe0b-24de-5631-8697-dd941f90decc"
@@ -1738,9 +1740,9 @@ version = "0.5.22"
 
 [[deps.Tracking]]
 deps = ["Acquisition", "CUDA", "DocStringExtensions", "GNSSSignals", "LinearAlgebra", "LoopVectorization", "StaticArrays", "StructArrays", "TrackingLoopFilters", "Unitful"]
-git-tree-sha1 = "d5a12e91820172516b079fa58684e32db73669c9"
+git-tree-sha1 = "0014a7ccd38da15440d66ea47088f3751fc59180"
 uuid = "10b2438b-ffd4-5096-aa58-44041d5c8f3b"
-version = "0.15.1"
+version = "0.15.2"
 
 [[deps.TrackingLoopFilters]]
 deps = ["DocStringExtensions", "LinearAlgebra", "Test", "Unitful"]

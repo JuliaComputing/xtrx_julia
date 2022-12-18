@@ -145,12 +145,14 @@ SoapyXTRX::SoapyXTRX(const SoapySDR::Kwargs &args)
 
     if (reset) {
         // set clock to Reference Clock Source
+        /*
         if (args.count("clock") == 0) {
             this->setClockSource("internal");
         } else {
             std::string clock = args.at("clock");
             this->setClockSource(clock);
         }
+        */
 
         // configure data port directions and data clock rates
         LMS7002M_configure_lml_port(_lms, LMS_PORT2, LMS_TX, 1);

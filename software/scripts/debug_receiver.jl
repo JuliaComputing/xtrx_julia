@@ -60,6 +60,73 @@ function debug_signal(;
     end
 end
 
+function debug_signal_multiple_devices(;
+    frequency = 1575.42u"MHz",
+    sample_rate = 5e6u"Hz",
+    run_time = 5u"s",
+)
+    num_samples_to_track = Int(upreferred(sample_rate * 4u"ms"))
+
+    devs = collect(Devices())
+    dev1 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "121c444ea8c85c", devs)))
+    dev2 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "30c5241b884854", devs)))
+
+    try
+        dev1.clock_source = "internal"
+        dev2.clock_source = "internal"
+        format = dev1.rx[1].native_stream_format
+
+        # We have to do this for now
+        ct = dev1.tx[1]
+        ct.bandwidth = sample_rate
+        ct.sample_rate = sample_rate
+
+        ct = dev2.tx[1]
+        ct.bandwidth = sample_rate
+        ct.sample_rate = sample_rate
+
+        # Setup receive parameters
+        for cr in dev1.rx
+            cr.antenna = :LNAW
+            cr.bandwidth = sample_rate
+            cr.sample_rate = sample_rate
+            cr.gain = 60u"dB"
+            cr.gain_mode = false
+            cr.frequency = frequency
+            cr[SoapySDR.Setting("CALIBRATE")] = "5e6"
+        end
+
+        for cr in dev2.rx
+            cr.antenna = :LNAW
+            cr.bandwidth = sample_rate
+            cr.sample_rate = sample_rate
+            cr.gain = 60u"dB"
+            cr.gain_mode = false
+            cr.frequency = frequency
+            cr[SoapySDR.Setting("CALIBRATE")] = "5e6"
+        end
+
+        stream_rx1 = SoapySDR.Stream(format, dev1.rx)
+        stream_rx2 = SoapySDR.Stream(format, dev2.rx)
+
+        num_total_samples = Int(upreferred(sample_rate * run_time))
+
+        # RX reads the buffers in, and pushes them onto `iq_data`
+        samples_channel = stream_data(stream_rx1, stream_rx2, num_total_samples; leadin_buffers=0)
+
+        reshunked_channel = rechunk(samples_channel, num_samples_to_track)
+
+        measurement, spawn_event = collect_single_chunk_at(reshunked_channel, counter_threshold = 1000) # After 100 ms
+
+        wait(spawn_event)
+
+        measurement
+    finally
+        finalize(dev1)
+        finalize(dev2)
+    end
+end
+
 function debug_dac(;
     frequency = 1575.42u"MHz",
     sample_rate = 5e6u"Hz",

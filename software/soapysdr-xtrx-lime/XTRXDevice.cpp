@@ -162,12 +162,14 @@ SoapyXTRX::SoapyXTRX(const ConnectionHandle &handle, const SoapySDR::Kwargs &arg
     writeSetting("FPGA_TX_DELAY", "16");
 
     // set clock to Reference Clock Source
+    /*
     if (args.count("clock") == 0) {
         this->setClockSource("internal");
     } else {
         std::string clock = args.at("clock");
         this->setClockSource(clock);
     }
+    */
 
     SoapySDR::logf(SOAPY_SDR_INFO, "LMS7002M info: revision %d, version %d",
         lms7Device->ReadParam(LMS7_REV),

@@ -179,20 +179,25 @@ function eval_missing_samples(;
 end
 
 function eval_missing_samples_over_multiple_devices(;
-    frequency = 1565.42u"MHz",
+    frequency = 1575.42u"MHz",
     sample_rate = 5e6u"Hz",
     run_time = 10u"s",
+    pps_signal_after = 100u"ms",
     gnss_system = GPSL1(),
-    count_dma_buffers = false
+    count_dma_buffers = false,
+    devs
 )
     num_samples_to_track = Int(upreferred(sample_rate * 1u"ms"))
 
+    cdevs = collect(devs)
     # Do not run Devices twice
-    devs = collect(Devices())
-    dev1 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "4c1c440ea8c85c", devs)))
-    dev2 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "12cc5241b88485c", devs)))
+    dev1 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "4c1c444ea8c85c", cdevs)))
+    dev2 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "12cc5241b88485c", cdevs)))
 
     try
+#        dev1[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_PCIE_DMA0_SYNCHRONIZER_ENABLE_ADDR)] = 1
+#        dev2[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_PCIE_DMA0_SYNCHRONIZER_ENABLE_ADDR)] = 1
+        
         synchro_dev1 = dev1[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] 
         synchro_dev2 = dev2[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] 
         @show synchro_dev1, synchro_dev2
@@ -201,7 +206,7 @@ function eval_missing_samples_over_multiple_devices(;
 
         synchro_dev1 = dev1[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] 
         synchro_dev2 = dev2[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] 
-        @show synchro_dev1, synchro_dev2
+        @show synchro_dev1, synchro_dev2       
 
         format = dev1.rx[1].native_stream_format
         fullscale = dev1.tx[1].fullscale
@@ -226,7 +231,7 @@ function eval_missing_samples_over_multiple_devices(;
             cr.bandwidth = sample_rate
             cr.frequency = frequency
             cr.sample_rate = sample_rate
-            cr.gain = 50u"dB"
+            cr.gain = 60u"dB"
             cr.gain_mode = false
         end
 
@@ -234,7 +239,7 @@ function eval_missing_samples_over_multiple_devices(;
             cr.bandwidth = sample_rate
             cr.frequency = frequency
             cr.sample_rate = sample_rate
-            cr.gain = 50u"dB"
+            cr.gain = 60u"dB"
             cr.gain_mode = false
         end
 
@@ -307,5 +312,62 @@ function eval_missing_samples_over_multiple_devices(;
     finally
         finalize(dev1)
         finalize(dev2)
+    end
+end
+
+function transmit_pps(;
+    sample_rate = 5e6u"Hz",
+    run_time = 10u"s",
+    pps_signal_after = 100u"ms",
+    devs
+)
+
+    # Do not run Devices twice
+    pps_dev = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "30c5241b884854", collect(devs))))
+    pps_dev.clock_source = "internal"
+
+    try
+
+        format = pps_dev.rx[1].native_stream_format
+        fullscale = Int(pps_dev.tx[1].fullscale)
+
+        # PPS
+        ct_pps = pps_dev.tx[1]
+        ct_pps.bandwidth = sample_rate
+        ct_pps.frequency = 50u"MHz"
+        ct_pps.sample_rate = sample_rate
+        ct_pps.gain = 10u"dB"
+        ct_pps.gain_mode = false
+
+        for cr in pps_dev.rx
+            cr.bandwidth = sample_rate
+            cr.sample_rate = sample_rate
+        end
+
+        pps_stream_tx = SoapySDR.Stream(format, pps_dev.tx)
+        num_samples = pps_stream_tx.mtu
+        num_total_samples = Int(upreferred(sample_rate * run_time))
+
+        pps_signal = ones(Complex{Int16}, num_samples, pps_stream_tx.nchannels) * Complex{Int16}(fullscale >> 1)
+        zero_signal = zeros(Complex{Int16}, num_samples, pps_stream_tx.nchannels)
+        num_samples_to_start_pps_signal = floor(Int, upreferred(sample_rate * pps_signal_after))
+        transmitted_samples = 0
+        pps_tx = generate_stream(num_samples, pps_stream_tx.nchannels; T=format) do buff
+            if transmitted_samples > num_total_samples
+                return false
+            end
+            if transmitted_samples > num_samples_to_start_pps_signal
+                copyto!(buff, pps_signal)
+            else
+                copyto!(buff, zero_signal)
+            end
+            transmitted_samples += num_samples
+            return true
+        end
+        pps_tx = stream_data(pps_stream_tx, pps_tx)
+
+        wait(pps_tx)
+    finally
+        finalize(pps_dev)
     end
 end

@@ -24,13 +24,15 @@ function estimate_frequency_offset_roughly(;
 
     device_kwargs = Dict{Symbol,Any}()
     if chomp(String(read(`hostname`))) == "pathfinder"
-        device_kwargs[:driver] = "XTRX"
-        device_kwargs[:serial] = "12cc5241b88485c"
+        device_kwargs[:driver] = "XTRXLime"
+        device_kwargs[:serial] = "30c5241b884854"
     end
     device_kwargs[:driver] = "XTRXLime"
     gpsl1 = GPSL1()
 
     measurement = Device(first(Devices(;device_kwargs...))) do dev
+
+        dev.clock_source = "internal"
 
         format = dev.rx[1].native_stream_format
 
@@ -71,11 +73,15 @@ function estimate_frequency_offset_roughly(;
 
         measurement
     end
-    frequency_offsets_to_test = -15u"kHz":2.5u"kHz":15u"kHz"
+    
+end
+
+function find_frequency_offset_with_acquisition(measurement, sample_rate, system; frequency_offsets_to_test = -15u"kHz":2.5u"kHz":15u"kHz")
     num_frequency_offsets = length(frequency_offsets_to_test)
     num_sats = zeros(num_frequency_offsets)
     for i in 1:num_frequency_offsets
-        acq_res = coarse_fine_acquire(gpsl1, measurement[:,1], sample_rate, 1:32, interm_freq = frequency_offsets_to_test[i])
+        adjusted_sample_freq = sample_rate * (1 - frequency_offsets_to_test[i] / get_center_frequency(system))
+        acq_res = coarse_fine_acquire(system, measurement[:,1], sample_rate, 1:32, interm_freq = frequency_offsets_to_test[i])
         acq_res_valid = filter(x -> x.CN0 > 43, acq_res)
         num_sats[i] = length(acq_res_valid)
     end
@@ -88,7 +94,7 @@ function estimate_frequency_offset_roughly(;
     end
     best_frequency_offset_idx = max_sats_idx + counter >> 1
     @info "Your offset is probably around $(frequency_offsets_to_test[best_frequency_offset_idx]). I found $max_sats satellites using this frequency offstet." OrderedDict(frequency_offsets_to_test .=> num_sats)
-    upreferred(frequency_offsets_to_test[best_frequency_offset_idx] / get_center_frequency(gpsl1))
+    upreferred(frequency_offsets_to_test[best_frequency_offset_idx] / get_center_frequency(system))
 end
 
 function estimate_frequency_offset(;

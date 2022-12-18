@@ -13,7 +13,7 @@ include("sized_channel.jl")
 
 # Helper for turning a matrix into a tuple of views, for use with the SoapySDR API.
 function split_matrix(m::AbstractMatrix{T}) where {T <: Number}
-    return tuple(collect(view(m, :, idx) for idx in 1:size(m,2))...)
+    return [view(m, :, idx) for idx = 1:size(m, 2)]
 end
 
 _default_verbosity = false
