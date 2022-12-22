@@ -10,6 +10,7 @@
 
 #include "XTRXDevice.hpp"
 
+#include <SoapySDR/Errors.h>
 #include <SoapySDR/Formats.h>
 #include <chrono>
 #include <cassert>
@@ -217,7 +218,7 @@ int SoapyXTRX::getDirectAccessBufferAddrs(SoapySDR::Stream *stream,
 // advance buffers without performing a syscall (only having to interface with
 // the kernel when retiring buffers). That however results in slower detection
 // of overflows/underflows, so we make that configurable:
-#define DETECT_EVERY_OVERFLOW  true
+#define DETECT_EVERY_OVERFLOW  false
 #define DETECT_EVERY_UNDERFLOW true
 
 int SoapyXTRX::acquireReadBuffer(SoapySDR::Stream *stream, size_t &handle,
@@ -256,30 +257,29 @@ int SoapyXTRX::acquireReadBuffer(SoapySDR::Stream *stream, size_t &handle,
         assert(buffers_available > 0);
     }
 
+    int ret;
     // detect overflows of the underlying circular buffer
     if ((_rx_stream.hw_count - _rx_stream.sw_count) >
         ((int64_t)_dma_mmap_info.dma_rx_buf_count / 2)) {
-        // drain all buffers to get out of the overflow quicker
-        struct litepcie_ioctl_mmap_dma_update mmap_dma_update;
-        mmap_dma_update.sw_count = _rx_stream.hw_count;
-        checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_WRITER_UPDATE, &mmap_dma_update);
-        _rx_stream.user_count = _rx_stream.hw_count;
-        _rx_stream.sw_count = _rx_stream.hw_count;
-        handle = -1;
 
+        // one behavor here may be to drain the buffers and zoom the counter ahead.
+        // but we are going just return an overflow to tell the application
+        // to hurry up, and hope timing will be okay in the end.
+        // If this is not the case, the kernel ring buffer will overwrite
+        // the data and we will get a corrupted stream.
         flags |= SOAPY_SDR_END_ABRUPT;
-        return SOAPY_SDR_OVERFLOW;
+        ret = SOAPY_SDR_OVERFLOW;
     } else {
-        // get the buffer
-        int buf_offset = _rx_stream.user_count % _dma_mmap_info.dma_rx_buf_count;
-        getDirectAccessBufferAddrs(stream, buf_offset, (void **)buffs);
-
-        // update the DMA counters
-        handle = _rx_stream.user_count;
-        _rx_stream.user_count++;
-
-        return getStreamMTU(stream);
+        ret = getStreamMTU(stream);
     }
+    // get the buffer
+    int buf_offset = _rx_stream.user_count % _dma_mmap_info.dma_rx_buf_count;
+    getDirectAccessBufferAddrs(stream, buf_offset, (void **)buffs);
+
+    // update the DMA counters
+    handle = _rx_stream.user_count;
+    _rx_stream.user_count++;
+    return ret;
 }
 
 void SoapyXTRX::releaseReadBuffer(SoapySDR::Stream */*stream*/, size_t handle) {
@@ -406,65 +406,20 @@ int SoapyXTRX::readStream(
     // determine how many samples (of I and Q for both channels) we can process
     size_t samples = std::min(numElems, getStreamMTU(stream));
 
-    // in the case of a split transaction, keep track of the amount of samples
-    // we processed already
-    size_t submitted_samples = 0;
-
-    if (_rx_stream.remainderHandle >= 0) {
-        // there is still some place left in the unsubmitted buffer, so fill
-        // it with as many new samples as possible
-        const size_t n = std::min(_rx_stream.remainderSamps, samples);
-
-        if (n < samples) {
-            // couldn't fit them all, so split the transaction
-            submitted_samples = n;
-        }
-
-        // unpack active channels
-        for (auto channel_idx : _rx_stream.channels) {
-            deinterleave_cs16((int16_t*)_rx_stream.remainderBuff, _rx_stream.remainderOffset, (int16_t*)buffs[channel_idx], 0, 2, channel_idx, n);
-        }
-        _rx_stream.remainderSamps -= n;
-        _rx_stream.remainderOffset += n;
-
-        if (_rx_stream.remainderSamps == 0)
-        {
-            releaseReadBuffer(stream, _rx_stream.remainderHandle);
-            _rx_stream.remainderHandle = -1;
-            _rx_stream.remainderOffset = 0;
-        }
-
-        // finish processing if all samples were processed
-        if (n == samples)
-            return samples;
-    }
-
     // get a new buffer
     size_t handle;
     int ret = acquireReadBuffer(stream, handle, (const void **)&_rx_stream.remainderBuff, flags, timeNs, timeoutUs);
-    if (ret < 0) {
+    if (ret == SOAPY_SDR_TIMEOUT) {
         return ret;
-    }
-
-    _rx_stream.remainderHandle = handle;
-    _rx_stream.remainderSamps = ret;
-
-    const size_t n = std::min((samples - submitted_samples), _rx_stream.remainderSamps);
+    } // otherwise near-overflow, keep processing
 
     // unpack active channels
     for (auto channel_idx : _rx_stream.channels) {
-        deinterleave_cs16((int16_t*)_rx_stream.remainderBuff, 0, (int16_t*)buffs[channel_idx], submitted_samples, 2, channel_idx, n);
-    }
-    _rx_stream.remainderSamps -= n;
-    _rx_stream.remainderOffset += n;
-
-    if (_rx_stream.remainderSamps == 0) {
-        releaseReadBuffer(stream, _rx_stream.remainderHandle);
-        _rx_stream.remainderHandle = -1;
-        _rx_stream.remainderOffset = 0;
+        deinterleave_cs16((int16_t*)_rx_stream.remainderBuff, 0, (int16_t*)buffs[channel_idx], 0, 2, channel_idx, samples);
     }
 
-    return samples;
+    releaseReadBuffer(stream, handle);
+    return ret;
 }
 
 int SoapyXTRX::writeStream(
