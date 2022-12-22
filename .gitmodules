@@ -25,3 +25,6 @@
 [submodule "software/GNSSReceiver.jl"]
 	path = software/GNSSReceiver.jl
 	url = https://github.com/JuliaGNSS/GNSSReceiver.jl.git
+[submodule "software/SoapySDRRecorder.jl"]
+	path = software/SoapySDRRecorder.jl
+	url = https://github.com/JuliaTelecom/SoapySDRRecorder.jl.git
