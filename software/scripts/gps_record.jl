@@ -1,11 +1,27 @@
+
+if isempty(ARGS)
+
+    println("Usage: gps_record.jl <device_id> [--synchro]")
+    exit()
+end
+dev_id = ARGS[1]
+synchro = in("--synchro", ARGS)
+
+@info "using device with id: $dev_id"
+@info "synchro: $synchro"
+
 using SoapySDR, SoapySDRRecorder, Unitful, XTRX, Base.Threads
 
-@assert Threads.nthreads() >= 2
 
 # Channel confuguration callback
 function configuration(dev, chans)
 
     #dev[SoapySDR.Setting("biastee")] = "true"
+    for tx in dev.tx
+        tx.sample_rate = 5u"MHz"
+        tx.bandwidth = 5u"MHz"
+        tx.frequency = 1_575_420_000u"Hz"
+    end 
 
     for rx in chans
         rx.sample_rate = 5u"MHz"
@@ -41,32 +57,20 @@ end
 
 
 devs = collect(Devices());
-dev1 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "121c444ea8c85c", devs)));
-dev2 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == "30c5241b884854", devs)));
+dev1 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == dev_id, devs)));
 
+if synchro
+    synchro_dev1 = dev1[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] 
+    dev1[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] = synchro_dev1 | (2 << XTRX.CSRs.CSR_SYNCHRO_CONTROL_INT_SOURCE_OFFSET | 2 << XTRX.CSRs.CSR_SYNCHRO_CONTROL_OUT_SOURCE_OFFSET)
+    dev1.clock_source = "external+pps"
+else
+    dev1.clock_source = "internal"
+end
 
-synchro_dev1 = dev1[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] 
-synchro_dev2 = dev2[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] 
-@show synchro_dev1, synchro_dev2
-dev1[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] = synchro_dev1 | (2 << XTRX.CSRs.CSR_SYNCHRO_CONTROL_INT_SOURCE_OFFSET | 2 << XTRX.CSRs.CSR_SYNCHRO_CONTROL_OUT_SOURCE_OFFSET)
-dev2[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] = synchro_dev2 | (2 << XTRX.CSRs.CSR_SYNCHRO_CONTROL_INT_SOURCE_OFFSET | 2 << XTRX.CSRs.CSR_SYNCHRO_CONTROL_OUT_SOURCE_OFFSET)
-
-format = dev1.rx[1].native_stream_format
-fullscale = dev1.tx[1].fullscale
-dev1.clock_source = "external+pps"
-dev2.clock_source = "external+pps"
 
 GC.gc()
 
-GC.enable(false)
+SoapySDRRecorder.record("/mnt/data_disk/gps_record_$(dev_id)", device=dev1, channel_configuration=configuration,
+    telemetry_callback=telemetry_callback, csv_log = true, timer_display=true, csv_log_callback=csv_log_callback, csv_header_callback=csv_header_callback, timeout=100000000,
+    compress=true, compression_level=3, initial_buffers=4096)
 
-t1 = Threads.@spawn SoapySDRRecorder.record("/mnt/data_disk/gps_record13_dev1", device=dev1, channel_configuration=configuration,
-    telemetry_callback=telemetry_callback, csv_log = true, timer_display=false, csv_log_callback=csv_log_callback, csv_header_callback=csv_header_callback, timeout=0,
-    compress=false, compression_level=1)
-
-t2 = Threads.@spawn SoapySDRRecorder.record("/mnt/data_disk/gps_record13_dev2", device=dev2, channel_configuration=configuration,
-    telemetry_callback=telemetry_callback, csv_log = true, timer_display=false, csv_log_callback=csv_log_callback, csv_header_callback=csv_header_callback, timeout=0,
-    compress=false, compression_level=1)
-
-wait(t1)
-wait(t2)
