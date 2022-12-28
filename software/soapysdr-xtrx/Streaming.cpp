@@ -132,7 +132,6 @@ int SoapyXTRX::activateStream(SoapySDR::Stream *stream, const int /*flags*/,
         litepcie_dma_reader(_fd, 1, &_tx_stream.hw_count, &_tx_stream.sw_count);
         _tx_stream.user_count = 0;
     }
-    activeStreams.insert(stream);
     return 0;
 }
 
@@ -145,7 +144,6 @@ int SoapyXTRX::deactivateStream(SoapySDR::Stream *stream, const int /*flags*/,
         // disable the DMA engine
         litepcie_dma_reader(_fd, 1, &_tx_stream.hw_count, &_tx_stream.sw_count);
     }
-    activeStreams.erase(stream);
     return 0;
 }
 
