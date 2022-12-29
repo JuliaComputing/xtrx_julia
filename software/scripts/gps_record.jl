@@ -1,17 +1,6 @@
-
-if isempty(ARGS)
-
-    println("Usage: gps_record.jl <device_id> [--synchro]")
-    exit()
-end
-dev_id = ARGS[1]
-synchro = in("--synchro", ARGS)
-
-@info "using device with id: $dev_id"
-@info "synchro: $synchro"
-
 using SoapySDR, SoapySDRRecorder, Unitful, XTRX, Base.Threads
 
+synchro = false
 
 # Channel confuguration callback
 function configuration(dev, chans)
@@ -57,20 +46,31 @@ end
 
 
 devs = collect(Devices());
-dev1 = Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == dev_id, devs)));
 
-if synchro
-    synchro_dev1 = dev1[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] 
-    dev1[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] = synchro_dev1 | (2 << XTRX.CSRs.CSR_SYNCHRO_CONTROL_INT_SOURCE_OFFSET | 2 << XTRX.CSRs.CSR_SYNCHRO_CONTROL_OUT_SOURCE_OFFSET)
-    dev1.clock_source = "external+pps"
-else
-    dev1.clock_source = "internal"
+recorder_tasks = []
+
+dev_list = []
+
+
+for dev_id in ("12cc5241b88485c", "30c5241b884854", "121c444ea8c85c")
+    push!(dev_list, (Device(only(filter(x -> x["driver"] == "XTRXLime" && x["serial"] == dev_id, devs))), dev_id))
 end
 
+for (dev1, dev_id) in dev_list
+    if synchro
+        synchro_dev1 = dev1[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] 
+        dev1[(SoapySDR.Register("LitePCI"),XTRX.CSRs.CSR_SYNCHRO_CONTROL_ADDR)] = synchro_dev1 | (2 << XTRX.CSRs.CSR_SYNCHRO_CONTROL_INT_SOURCE_OFFSET | 2 << XTRX.CSRs.CSR_SYNCHRO_CONTROL_OUT_SOURCE_OFFSET)
+        dev1.clock_source = "external+pps"
+    else
+        dev1.clock_source = "internal"
+    end
 
-GC.gc()
+    t = Threads.@spawn SoapySDRRecorder.record("/mnt/data_disk/gps_record_$(dev_id)", device=dev1, channel_configuration=configuration,
+        telemetry_callback=telemetry_callback, csv_log = true, timer_display=false, csv_log_callback=csv_log_callback, csv_header_callback=csv_header_callback, timeout=100000000,
+        compress=true, compression_level=3, initial_buffers=4096)
 
-SoapySDRRecorder.record("/mnt/data_disk/gps_record_$(dev_id)", device=dev1, channel_configuration=configuration,
-    telemetry_callback=telemetry_callback, csv_log = true, timer_display=true, csv_log_callback=csv_log_callback, csv_header_callback=csv_header_callback, timeout=100000000,
-    compress=true, compression_level=3, initial_buffers=4096)
+    #sleep(10)
+    push!(recorder_tasks, t)
+end
 
+wait(recorder_tasks[1])
